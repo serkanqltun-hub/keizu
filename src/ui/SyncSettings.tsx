@@ -415,8 +415,81 @@ export function SyncSettings({ onBack, link }: Props) {
             </label>
           </section>
         )}
+        {config && <EncryptionCard />}
         {config && <Activity items={activity} />}
       </main>
     </div>
+  );
+}
+
+/** Optional end-to-end encryption of synced maps, with its trade-offs spelled out. */
+function EncryptionCard() {
+  const [on, setOn] = useState(sync.getEncryption());
+  const [editing, setEditing] = useState(false);
+  const [pass, setPass] = useState('');
+  const [pass2, setPass2] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const save = () => {
+    setError(null);
+    if (pass !== pass2) return setError(t('e2e.mismatch'));
+    try {
+      sync.setEncryption(true, pass);
+      setOn(true);
+      setEditing(false);
+      setPass('');
+      setPass2('');
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  return (
+    <section className="set-card">
+      <div className="set-head">
+        <strong>
+          <I.Lock size={16} /> {t('e2e.title')}
+        </strong>
+        <span className={`pill ${on ? 'ok' : ''}`}>{on ? t('e2e.on') : t('e2e.off')}</span>
+      </div>
+      <p className="muted small">{t('e2e.intro')}</p>
+      <ul className="muted small e2e-list">
+        <li>{t('e2e.noShare')}</li>
+        <li>{t('e2e.samePass')}</li>
+        <li>{t('e2e.lost')}</li>
+      </ul>
+      {editing ? (
+        <form
+          className="e2e-form"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save();
+          }}
+        >
+          <input className="fld" type="password" autoComplete="new-password" placeholder={t('e2e.pass')} value={pass} onChange={(e) => setPass(e.target.value)} />
+          <input className="fld" type="password" autoComplete="new-password" placeholder={t('e2e.pass2')} value={pass2} onChange={(e) => setPass2(e.target.value)} />
+          {error && <p className="share-error" role="alert">{error}</p>}
+          <div className="row">
+            <button className="btn primary" disabled={!pass}>{t('e2e.enable')}</button>
+            <button type="button" className="btn" onClick={() => setEditing(false)}>{t('common.cancel')}</button>
+          </div>
+        </form>
+      ) : on ? (
+        <div className="row">
+          <button
+            className="btn"
+            onClick={() => {
+              if (!window.confirm(t('e2e.confirmOff'))) return;
+              sync.setEncryption(false);
+              setOn(false);
+            }}
+          >
+            {t('e2e.disable')}
+          </button>
+        </div>
+      ) : (
+        <div className="row">
+          <button className="btn" onClick={() => setEditing(true)}>{t('e2e.setup')}</button>
+        </div>
+      )}
+    </section>
   );
 }

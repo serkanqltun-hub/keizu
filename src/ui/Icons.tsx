@@ -80,3 +80,31 @@ export const MapIcon = (p: P) => <Svg {...p}><rect x="9" y="10" width="6" height
 export const Command = (p: P) => <Svg {...p}><path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z" /></Svg>;
 export const Cloud = (p: P) => <Svg {...p}><path d="M7 18a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.4 1.6A3.8 3.8 0 0 1 17.5 18z" /></Svg>;
 export const Back = (p: P) => <Svg {...p}><path d="M15 6l-6 6 6 6" /></Svg>;
+
+export const Present = ({ size }: P) => (
+  <Svg size={size}>
+    <rect x="3" y="4" width="18" height="12" rx="1.5" />
+    <path d="M12 16v4M8 20h8M10 8.5v4l3.5-2z" />
+  </Svg>
+);
+
+export const Share = ({ size }: P) => (
+  <Svg size={size}>
+    <circle cx="9" cy="8" r="3" />
+    <path d="M3.5 19c.6-3 2.8-5 5.5-5s4.9 2 5.5 5M16 7v6M13 10h6" />
+  </Svg>
+);
+
+export const Users = ({ size }: P) => (
+  <Svg size={size}>
+    <circle cx="9" cy="8" r="3" />
+    <path d="M3.5 19c.6-3 2.8-5 5.5-5s4.9 2 5.5 5M15.5 5.2a3 3 0 0 1 0 5.6M17 14.3c1.8.6 3 2.4 3.5 4.7" />
+  </Svg>
+);
+
+export const Lock = ({ size }: P) => (
+  <Svg size={size}>
+    <rect x="5" y="11" width="14" height="9" rx="2" />
+    <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+  </Svg>
+);

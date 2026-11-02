@@ -21,7 +21,32 @@ export interface ServerInfo {
   minClientApi: number;
   /** 'ok', or which side needs an update. */
   compat: 'ok' | 'update-server' | 'update-app';
+  /** Optional abilities: 'share', 'live', 'viewLinks' (Keizu Server 1.1+). */
+  features: string[];
 }
+
+export type ShareRole = 'view' | 'edit';
+
+export interface ShareInfo {
+  shares: { username: string; role: ShareRole; since: string }[];
+  /** Read-only link, if one is active. */
+  link: string | null;
+  /** People in the map's live session right now. */
+  live: number;
+}
+
+export interface SharedMap {
+  id: string;
+  title: string;
+  version: number;
+  updatedAt: string;
+  role: ShareRole;
+  ownerId: number;
+  owner: string;
+}
+
+/** The live-collaboration WebSocket address for an API base. */
+export const liveUrl = (api: string) => `${api.replace(/^http/, 'ws')}/live`;
 
 export interface Session {
   token: string;
@@ -79,6 +104,7 @@ export async function discover(f: Fetch, address: string): Promise<ServerInfo> {
     apiVersion,
     minClientApi,
     compat: apiVersion < MIN_SERVER_API ? 'update-server' : minClientApi > CLIENT_API ? 'update-app' : 'ok',
+    features: Array.isArray(info.features) ? info.features.map(String) : [],
   };
 }
 
@@ -180,6 +206,52 @@ export class KeizuServerAdapter implements SyncAdapter {
   /** A pairing code (and QR) to sign another device in. */
   async pairCode(): Promise<{ code: string; expiresAt: string; link: string; qrSvg: string }> {
     return (await this.ok(await this.req('/pair-codes', { method: 'POST' }))).json();
+  }
+
+  // ---------- sharing (Keizu Server 1.1+) ----------
+
+  async shares(id: string): Promise<ShareInfo | undefined> {
+    const res = await this.req(`/maps/${encodeURIComponent(id)}/shares`);
+    if (res.status === 404) return undefined; // not on the server yet
+    return (await this.ok(res)).json();
+  }
+
+  async share(id: string, username: string, role: ShareRole): Promise<ShareInfo> {
+    return (
+      await this.ok(
+        await this.req(`/maps/${encodeURIComponent(id)}/shares/${encodeURIComponent(username)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role }),
+        }),
+      )
+    ).json();
+  }
+
+  async unshare(id: string, username: string): Promise<ShareInfo> {
+    return (await this.ok(await this.req(`/maps/${encodeURIComponent(id)}/shares/${encodeURIComponent(username)}`, { method: 'DELETE' }))).json();
+  }
+
+  async createLink(id: string): Promise<ShareInfo> {
+    return (await this.ok(await this.req(`/maps/${encodeURIComponent(id)}/link`, { method: 'POST' }))).json();
+  }
+
+  async removeLink(id: string): Promise<ShareInfo> {
+    return (await this.ok(await this.req(`/maps/${encodeURIComponent(id)}/link`, { method: 'DELETE' }))).json();
+  }
+
+  /** A map someone shared with this account, as stored now. */
+  async getShared(ownerId: number, id: string): Promise<MindMap | undefined> {
+    const res = await this.req(`/shared/${ownerId}/${encodeURIComponent(id)}`);
+    if (res.status === 404) return undefined;
+    return normalizeMap(await (await this.ok(res)).json());
+  }
+
+  /** Maps other people on the server shared with this account. */
+  async sharedWithMe(): Promise<SharedMap[]> {
+    const res = await this.req('/shared');
+    if (res.status === 404) return []; // older server
+    return ((await (await this.ok(res)).json()) as { maps: SharedMap[] }).maps;
   }
 
   async versions(id: string): Promise<{ version: number; savedAt: string; device: string; size: number }[]> {

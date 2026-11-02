@@ -40,6 +40,21 @@ import {
   validId,
 } from './maps.ts';
 import { backupNow } from './backup.ts';
+import { LiveHub } from './live.ts';
+import {
+  accessTo,
+  ensureViewLink,
+  getViewLink,
+  isRole,
+  listShares,
+  removeShare,
+  removeViewLink,
+  setShare,
+  shareCounts,
+  sharedWith,
+  viewLinkTarget,
+  viewLinkUrl,
+} from './shares.ts';
 
 export const SERVER_VERSION: string = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 /** The sync API this server speaks, and the oldest one it still accepts. */
@@ -68,6 +83,8 @@ export interface Config {
   log?: (msg: string) => void;
   /** Built web app (the Keizu editor) served at "/". Without it "/" opens the panel. */
   webDir?: string;
+  /** Live collaboration rooms; made by createApp. */
+  live?: LiveHub;
 }
 
 class HttpError extends Error {
@@ -211,6 +228,8 @@ export function serverInfo() {
     minClientApi: MIN_CLIENT_API,
     signup: false,
     pairing: true,
+    /** Optional abilities newer apps can use: per-person sharing, live editing, read-only links. */
+    features: ['share', 'live', 'viewLinks'],
   };
 }
 
@@ -320,7 +339,9 @@ route('POST', '/api/v1/pair-codes', 'user', async (ctx) => {
 // ---------- maps ----------
 
 route('GET', '/api/v1/maps', 'user', ({ cfg, res, user }) => {
-  send(res, 200, { maps: listMaps(cfg.db, user.id), cursor: changesSince(cfg.db, user.id, 0).cursor });
+  const counts = shareCounts(cfg.db, user.id);
+  const maps = listMaps(cfg.db, user.id).map((m) => (counts[m.id] ? { ...m, sharedWith: counts[m.id] } : m));
+  send(res, 200, { maps, cursor: changesSince(cfg.db, user.id, 0).cursor });
 });
 
 route('GET', '/api/v1/changes', 'user', ({ cfg, res, req, user }) => {
@@ -352,7 +373,10 @@ route('PUT', '/api/v1/maps/:id', 'user', async (ctx) => {
     minFreeBytes: cfg.minFreeBytes,
     freeBytes: cfg.freeBytes,
   });
-  if (r.ok) return send(res, 200, { version: r.version, updatedAt: r.updatedAt }, { ETag: `"${r.version}"` });
+  if (r.ok) {
+    cfg.live?.external(user.id, id);
+    return send(res, 200, { version: r.version, updatedAt: r.updatedAt }, { ETag: `"${r.version}"` });
+  }
   if (r.reason === 'conflict' || r.reason === 'exists') {
     return send(res, r.reason === 'exists' ? 412 : 409, `{"error":"${r.reason}","version":${r.current.version},"map":${r.current.data}}`);
   }
@@ -371,6 +395,7 @@ route('PUT', '/api/v1/maps/:id', 'user', async (ctx) => {
 
 route('DELETE', '/api/v1/maps/:id', 'user', ({ cfg, res, req, user }) => {
   if (!deleteMap(cfg.db, user.id, req.params.id)) throw new HttpError(404, 'not_found', 'Harita bulunamadı.');
+  cfg.live?.external(user.id, req.params.id);
   send(res, 200, { ok: true });
 });
 
@@ -389,6 +414,83 @@ route('GET', '/api/v1/maps/:id/versions/:v', 'user', ({ cfg, res, req, user }) =
   const data = getVersion(cfg.db, user.id, req.params.id, Number(req.params.v));
   if (!data) throw new HttpError(404, 'not_found', 'Sürüm bulunamadı.');
   send(res, 200, data, { 'X-Keizu-Version': req.params.v });
+});
+
+// ---------- sharing ----------
+
+function ownMap(ctx: Ctx & { user: User }): string {
+  const id = ctx.req.params.id;
+  if (accessTo(ctx.cfg.db, ctx.user.id, ctx.user.id, id) !== 'owner') {
+    throw new HttpError(404, 'not_found', 'Harita bulunamadı. Paylaşmadan önce haritanın sunucuya senkronlanmış olması gerekir.');
+  }
+  return id;
+}
+
+function sharesOf(ctx: Ctx & { user: User }, id: string) {
+  const token = getViewLink(ctx.cfg.db, ctx.user.id, id);
+  return {
+    shares: listShares(ctx.cfg.db, ctx.user.id, id),
+    link: token ? viewLinkUrl(publicUrl(ctx), token) : null,
+    live: ctx.cfg.live?.present(ctx.user.id, id) ?? 0,
+  };
+}
+
+route('GET', '/api/v1/maps/:id/shares', 'user', (ctx) => send(ctx.res, 200, sharesOf(ctx, ownMap(ctx))));
+
+route('PUT', '/api/v1/maps/:id/shares/:username', 'user', async (ctx) => {
+  const id = ownMap(ctx);
+  const body = await readJson(ctx);
+  if (!isRole(body.role)) throw new HttpError(400, 'bad_role', 'Yetki "view" (görüntüleyebilir) veya "edit" (düzenleyebilir) olmalı.');
+  const target = findUser(ctx.cfg.db, ctx.req.params.username);
+  if (!target) throw new HttpError(404, 'no_user', 'Bu sunucuda böyle bir kullanıcı yok. Kullanıcı adını kontrol et.');
+  if (target.id === ctx.user.id) throw new HttpError(400, 'self', 'Haritayı kendinle paylaşamazsın.');
+  setShare(ctx.cfg.db, ctx.user.id, id, target.id, body.role);
+  ctx.cfg.live?.recheck(ctx.user.id, id);
+  send(ctx.res, 200, sharesOf(ctx, id));
+});
+
+route('DELETE', '/api/v1/maps/:id/shares/:username', 'user', (ctx) => {
+  const id = ownMap(ctx);
+  const target = findUser(ctx.cfg.db, ctx.req.params.username);
+  if (target) removeShare(ctx.cfg.db, ctx.user.id, id, target.id);
+  ctx.cfg.live?.recheck(ctx.user.id, id);
+  send(ctx.res, 200, sharesOf(ctx, id));
+});
+
+route('POST', '/api/v1/maps/:id/link', 'user', (ctx) => {
+  const id = ownMap(ctx);
+  ensureViewLink(ctx.cfg.db, ctx.user.id, id);
+  send(ctx.res, 200, sharesOf(ctx, id));
+});
+
+route('DELETE', '/api/v1/maps/:id/link', 'user', (ctx) => {
+  const id = ownMap(ctx);
+  removeViewLink(ctx.cfg.db, ctx.user.id, id);
+  send(ctx.res, 200, sharesOf(ctx, id));
+});
+
+route('GET', '/api/v1/shared', 'user', ({ cfg, res, user }) => send(res, 200, { maps: sharedWith(cfg.db, user.id) }));
+
+route('GET', '/api/v1/shared/:owner/:id', 'user', ({ cfg, res, req, user }) => {
+  const ownerId = Number(req.params.owner);
+  const role = accessTo(cfg.db, user.id, ownerId, req.params.id);
+  const m = role ? getMap(cfg.db, ownerId, req.params.id) : undefined;
+  if (!m) throw new HttpError(404, 'not_found', 'Harita bulunamadı ya da sana paylaşılmamış.');
+  send(res, 200, m.data, { ETag: `"${m.version}"`, 'X-Keizu-Version': String(m.version), 'X-Keizu-Role': role! });
+});
+
+// Read-only links work without an account. Wrong tokens count against the
+// caller's IP so links can't be guessed.
+const linkIp = new Limiter(60, 15 * 60e3);
+open('GET', '/api/v1/public/:token', ({ cfg, res, req }) => {
+  if (linkIp.blocked(req.ip)) throw new HttpError(429, 'rate_limited', 'Çok fazla deneme. Biraz sonra yeniden dene.');
+  const target = viewLinkTarget(cfg.db, req.params.token);
+  const m = target ? getMap(cfg.db, target.ownerId, target.mapId) : undefined;
+  if (!m) {
+    linkIp.fail(req.ip);
+    throw new HttpError(404, 'bad_link', 'Bu paylaşım linki geçersiz ya da iptal edilmiş.');
+  }
+  send(res, 200, m.data, { 'X-Keizu-Version': String(m.version) });
 });
 
 // ---------- administration ----------
@@ -518,7 +620,7 @@ const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, PUT, POST, PATCH, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Authorization, Content-Type, If-Match, If-None-Match, X-Keizu-Device',
-  'Access-Control-Expose-Headers': 'ETag, X-Keizu-Version',
+  'Access-Control-Expose-Headers': 'ETag, X-Keizu-Version, X-Keizu-Role',
   'Access-Control-Max-Age': '86400',
 };
 
@@ -618,7 +720,21 @@ export async function handle(cfg: Config, rawReq: IncomingMessage, res: ServerRe
 }
 
 export function createApp(cfg: Config): Server {
-  return createServer((req, res) => {
+  const server = createServer((req, res) => {
     handle(cfg, req, res);
   });
+  const live = (cfg.live ??= new LiveHub({
+    db: cfg.db,
+    log: cfg.log,
+    limits: (ownerId) => ({
+      quotaBytes: getUser(cfg.db, ownerId)?.quota_bytes ?? cfg.defaultQuotaBytes,
+      maxImageBytes: cfg.maxImageBytes,
+      totalBytes: cfg.totalBytes,
+      minFreeBytes: cfg.minFreeBytes,
+      freeBytes: cfg.freeBytes,
+    }),
+  }));
+  live.attach(server);
+  server.on('close', () => live.close());
+  return server;
 }

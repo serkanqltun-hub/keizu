@@ -23,6 +23,8 @@ WORKDIR /app
 COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 COPY server/src ./src
+# The live-collaboration data type is shared with the app (imported as ../../src/core/crdt.ts).
+COPY src/core/crdt.ts /src/core/crdt.ts
 COPY server/public ./public
 COPY --from=web /web ./web
 

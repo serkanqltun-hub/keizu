@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { createMap, type LayoutKind, type MindMap } from '../core/model';
+import type { LayoutKind, MindMap } from '../core/model';
+import { templateMap } from '../core/templates';
 import { matchText, searchMap, type TopicHit } from '../core/search';
 import { LANGS, getLang, locale, setLang, t, type Lang } from '../i18n';
 import type { MapStore, MapSummary } from '../sync/types';
 import { sync } from '../sync/controller';
+import { KeizuServerAdapter, type SharedMap } from '../sync/keizuServer';
 import { Highlight } from './CommandPalette';
 import { fmtWhen, statusText } from './SyncSettings';
 import * as I from './Icons';
@@ -13,6 +15,8 @@ import { fromFileList, isDesktop, pickFiles, type PickedFile } from './platform'
 interface Props {
   store: MapStore;
   onOpen(map: MindMap, focusId?: string): void;
+  /** Opens a map another account shared with this one (Keizu Server). */
+  onOpenShared(m: SharedMap): void;
   onSettings(): void;
   /** Imports files; resolves with an error message, if any. */
   onOpenFiles(files: PickedFile[]): Promise<string | null>;
@@ -50,6 +54,50 @@ const TEMPLATES: { layout: LayoutKind; svg: JSX.Element }[] = [
         <rect x="8" y="36" width="20" height="10" rx="3" stroke="#9C36B5" />
         <rect x="38" y="36" width="20" height="10" rx="3" stroke="#9C36B5" />
         <rect x="68" y="36" width="20" height="10" rx="3" stroke="#9C36B5" />
+      </svg>
+    ),
+  },
+  {
+    layout: 'concept',
+    svg: (
+      <svg width="96" height="56" viewBox="0 0 96 56" fill="none" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+        <rect x="36" y="4" width="24" height="12" rx="4" fill="#1F2A37" />
+        <path d="M44 16L20 40M52 16l24 24M28 40h40" stroke="#0C8599" />
+        <rect x="8" y="38" width="22" height="12" rx="4" stroke="#0C8599" />
+        <rect x="66" y="38" width="22" height="12" rx="4" stroke="#0C8599" />
+        <path d="M26 26h8M62 26h8" stroke="#C4C9D0" />
+      </svg>
+    ),
+  },
+  {
+    layout: 'timeline',
+    svg: (
+      <svg width="96" height="56" viewBox="0 0 96 56" fill="none" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+        <rect x="4" y="22" width="18" height="12" rx="4" fill="#1F2A37" />
+        <path d="M22 28h70" stroke="#E8590C" />
+        <rect x="28" y="23" width="14" height="10" rx="3" fill="#FFF4E6" stroke="#E8590C" />
+        <rect x="52" y="23" width="14" height="10" rx="3" fill="#FFF4E6" stroke="#E8590C" />
+        <rect x="76" y="23" width="14" height="10" rx="3" fill="#FFF4E6" stroke="#E8590C" />
+        <path d="M31 33v8h10M55 23v-8h10M79 33v8h10" stroke="#C4C9D0" />
+      </svg>
+    ),
+  },
+  {
+    layout: 'fishbone',
+    svg: (
+      <svg width="96" height="56" viewBox="0 0 96 56" fill="none" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+        <rect x="70" y="22" width="22" height="12" rx="4" fill="#1F2A37" />
+        <path d="M70 28H8M58 28L48 10M58 28L48 46M34 28L24 10M34 28L24 46" stroke="#C92A2A" />
+        <path d="M44 16h8M44 40h8M20 16h8M20 40h8" stroke="#C4C9D0" />
+      </svg>
+    ),
+  },
+  {
+    layout: 'matrix',
+    svg: (
+      <svg width="96" height="56" viewBox="0 0 96 56" fill="none" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+        <rect x="8" y="6" width="20" height="12" rx="2" fill="#1F2A37" />
+        <path d="M28 6h60v44H28zM48 6v44M68 6v44M28 18h60M28 34h60" stroke="#5F3DC4" />
       </svg>
     ),
   },
@@ -126,7 +174,7 @@ function SyncPill({ onClick }: { onClick(): void }) {
   );
 }
 
-export function Home({ store, onOpen, onSettings, onOpenFiles, notice, onNoticeShown }: Props) {
+export function Home({ store, onOpen, onOpenShared, onSettings, onOpenFiles, notice, onNoticeShown }: Props) {
   const [maps, setMaps] = useState<MapSummary[] | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -153,13 +201,41 @@ export function Home({ store, onOpen, onSettings, onOpenFiles, notice, onNoticeS
   }, [notice, onNoticeShown]);
 
   const refresh = () => store.list().then(setMaps);
+  // Maps people shared with this account, when a Keizu Server is connected.
+  const [sharedMaps, setSharedMaps] = useState<SharedMap[] | null>(null);
+  useEffect(() => {
+    if (!sync.hasSharing()) return;
+    let alive = true;
+    sync.adapter().then(async (a) => {
+      if (!(a instanceof KeizuServerAdapter)) return;
+      const list = await a.sharedWithMe().catch(() => null);
+      if (alive) setSharedMaps(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   useEffect(() => {
     refresh();
     return sync.onMapsChanged(() => refresh());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = async (layout: LayoutKind) => {
-    const map = { ...createMap(t('topic.central'), t('topic.main')), layout };
+    const map = templateMap(layout, {
+      central: t('topic.central'),
+      main: t('topic.main'),
+      concept: t('tpl.concept'),
+      conceptLink: t('tpl.conceptLink'),
+      timeline: t('tpl.timeline'),
+      event: t('tpl.event'),
+      detail: t('tpl.detail'),
+      fishbone: t('tpl.fishbone'),
+      cause: t('tpl.cause'),
+      subcause: t('tpl.subcause'),
+      matrix: t('tpl.matrix'),
+      column: t('tpl.column'),
+      cell: t('tpl.cell'),
+    });
     await store.save(map);
     onOpen(map);
   };
@@ -300,6 +376,29 @@ export function Home({ store, onOpen, onSettings, onOpenFiles, notice, onNoticeS
           </section>
         )}
 
+        {!!sharedMaps?.length && (
+          <section>
+            <h2>{t('home.sharedWithMe')}</h2>
+            <div className="card-grid">
+              {sharedMaps
+                .filter((m) => !query.trim() || matchText(query, m.title))
+                .map((m) => (
+                  <div key={`${m.ownerId}:${m.id}`} className="card shared">
+                    <button className="card-open" onClick={() => onOpenShared(m)}>
+                      <span className="card-art" aria-hidden="true">
+                        <I.Users size={34} />
+                      </span>
+                      <span className="card-title">{m.title}</span>
+                      <span className="card-meta">
+                        {t(m.role === 'edit' ? 'home.sharedEdit' : 'home.sharedView', { owner: m.owner })} · {when(m.updatedAt)}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </section>
+        )}
+
         <section>
           <h2>{query.trim() ? t('home.titleMatches') : t('home.myMaps')}</h2>
           {maps === null ? null : shown.length === 0 ? (
@@ -330,6 +429,7 @@ export function Home({ store, onOpen, onSettings, onOpenFiles, notice, onNoticeS
             </div>
           )}
         </section>
+
       </main>
       {dragging && <div className="drop-hint" aria-hidden="true">{t('home.dropHint')}</div>}
     </div>

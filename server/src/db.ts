@@ -79,6 +79,27 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (user_id, hash)
   );
   `,
+  `
+  -- A map shared with another account: role is 'view' or 'edit'. The person
+  -- sees only maps shared with them, never the owner's whole library.
+  CREATE TABLE shares (
+    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    map_id TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (owner_id, map_id, user_id)
+  );
+  CREATE INDEX shares_user ON shares(user_id);
+  -- Read-only links: anyone with the link can view the map, nothing more.
+  CREATE TABLE view_links (
+    token TEXT PRIMARY KEY,
+    owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    map_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE (owner_id, map_id)
+  );
+  `,
 ];
 
 // Loaded this way so bundlers that don't know node:sqlite yet (the app's

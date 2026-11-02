@@ -6,9 +6,11 @@ import './styles/app.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
+import { PublicView, viewToken } from './ui/PublicView';
+
+// A read-only share link (…/#view=<token>) opens just that map, no library.
+const token = viewToken();
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  <StrictMode>{token ? <PublicView token={token} /> : <App />}</StrictMode>,
 );

@@ -214,3 +214,14 @@ export async function onOpenFiles(fn: (paths: string[]) => void): Promise<() => 
   const { listen } = await import('@tauri-apps/api/event');
   return listen<string[]>('open-files', (e) => fn(e.payload));
 }
+
+/** Opens a web address in the system browser (desktop) or a new tab. */
+export async function openExternal(url: string): Promise<void> {
+  if (!/^(https?:|mailto:)/i.test(url)) return;
+  if (isDesktop) {
+    const { openUrl } = await import('@tauri-apps/plugin-opener');
+    await openUrl(url);
+    return;
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+}

@@ -41,7 +41,10 @@ export type CommandId =
   | 'panel'
   | 'shortcuts'
   | 'language'
-  | 'back';
+  | 'back'
+  | 'present'
+  | 'openLink'
+  | 'share';
 
 export interface CommandDef {
   id: CommandId;
@@ -86,6 +89,9 @@ export const COMMANDS: CommandDef[] = [
   { id: 'fit', keys: ['Mod+0'], group: 'view' },
   { id: 'history', keys: [], group: 'view' },
   { id: 'panel', keys: [], group: 'view' },
+  { id: 'present', keys: ['F5'], group: 'view' },
+  { id: 'openLink', keys: ['Alt+Enter'], group: 'navigate' },
+  { id: 'share', keys: [], group: 'file' },
   { id: 'save', keys: ['Mod+S'], group: 'file' },
   { id: 'saveAs', keys: ['Mod+Shift+S'], group: 'file' },
 ];

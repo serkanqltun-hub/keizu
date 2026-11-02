@@ -38,7 +38,7 @@ Uygulamanın uçtan uca testi (`src/sync/server.e2e.test.ts`) bu sunucuyu aynı 
 
 ## API (v1)
 
-Keşif: `GET /.well-known/keizu` → `{ keizu: "server", version, api: "/api/v1", apiVersion, minClientApi }`. Diğer her şey `Authorization: Bearer <token>` ister (giriş ve davet uçları hariç). CORS herkese açıktır; çerez kullanılmaz.
+Keşif: `GET /.well-known/keizu` → `{ keizu: "server", version, api: "/api/v1", apiVersion, minClientApi, features }` (`features`: 1.1'den beri `share`, `live`, `viewLinks`). Diğer her şey `Authorization: Bearer <token>` ister (giriş ve davet uçları hariç). CORS herkese açıktır; çerez kullanılmaz.
 
 | Yöntem | Yol | |
 | --- | --- | --- |
@@ -61,5 +61,21 @@ Keşif: `GET /.well-known/keizu` → `{ keizu: "server", version, api: "/api/v1"
 | GET / POST / DELETE | `/api/v1/admin/invites` | Davetler (yönetici) |
 | GET / PATCH / DELETE | `/api/v1/admin/users[/:id]` | Kullanıcılar, kota, sıfırlama linki (yönetici) |
 | GET | `/api/v1/admin/backup` | Anlık SQLite yedeği indir (yönetici) |
+| GET | `/api/v1/maps/:id/shares` | Haritanın paylaşımları, salt okunur link ve şu an canlı oturumdaki kişi sayısı (yalnız sahibi) |
+| PUT / DELETE | `/api/v1/maps/:id/shares/:kullanıcı` | `{role: "view" \| "edit"}` ile paylaş / paylaşımı kaldır |
+| POST / DELETE | `/api/v1/maps/:id/link` | Salt okunur link oluştur / iptal et (`https://sunucu/#view=<token>`) |
+| GET | `/api/v1/shared` | Benimle paylaşılan haritalar (`id, title, role, ownerId, owner`) |
+| GET | `/api/v1/shared/:sahip/:id` | Paylaşılan haritanın JSON'u; yetki `X-Keizu-Role` başlığında |
+| GET | `/api/v1/public/:token` | Salt okunur linkin haritası (hesap gerekmez; hatalı denemeler IP başına sınırlı) |
+
+### Canlı ortak çalışma (WebSocket)
+
+`/api/v1/live` adresine WebSocket açılır. İlk mesaj `{type: "hello", token, map, owner?}` olmalıdır (`owner`: başkasının haritasıysa sahibinin kullanıcı kimliği). Sunucu `welcome` ile haritanın CRDT hâlini (`src/core/crdt.ts`), yetkiyi (`owner`/`edit`/`view`) ve odadakileri gönderir. Sonra:
+
+- `{type: "ops", ops, seq}`: değişiklikler (kayıt yazmaları). Sunucu uygular, odadaki diğerlerine iletir, `{type: "ack", seq}` döner. `view` yetkisi yazamaz.
+- `{type: "sel", id}`: seçili konu (diğerlerinde renkli çerçeve olarak görünür).
+- Sunucudan: `ops`, `peers`, `sel`, `role` (yetki değişti), `saved` (harita kaydedildi), `error`.
+
+Oda, son değişiklikten 1,5 saniye sonra haritayı normal kayıt gibi saklar (sürüm geçmişine de girer). Oda açıkken REST ile gelen bir kayıt (ör. başka cihazın senkronu) odaya birleştirilir. Paylaşım kaldırılınca o kişi odadan çıkarılır. Ters vekil (nginx) arkasında `Upgrade` başlıklarının iletilmesi gerekir: [deploy/nginx-keizu.conf](deploy/nginx-keizu.conf); Caddy bunu kendiliğinden yapar.
 
 Hata gövdeleri `{error, message}` biçimindedir. `413` (çok büyük / kota / görsel), `429` (çok fazla deneme), `507` (sunucu dolu).

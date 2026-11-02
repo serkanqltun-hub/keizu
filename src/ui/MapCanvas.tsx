@@ -48,6 +48,12 @@ interface Props {
   onMove(id: string, parentId: string): void;
   onToggleCollapse(id: string): void;
   onZoomChange(k: number): void;
+  /** The link icon on a topic was clicked. */
+  onOpenLink?(id: string): void;
+  /** View only: no dragging, no new topics. */
+  readOnly?: boolean;
+  /** Other people in a live session and the topic each has selected. */
+  peers?: { id: string; name: string; color: string; selectedId?: string | null }[];
 }
 
 interface View {
@@ -224,6 +230,11 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       if (topicId) props.onPickRelationTarget(topicId);
       return;
     }
+    if (topicId && el.closest('[data-link-glyph]') && props.onOpenLink) {
+      props.onSelect(topicId);
+      props.onOpenLink(topicId);
+      return;
+    }
     const relation = el.closest('[data-relation-id]');
     if (relation && e.button === 0) {
       props.onSelectRelation(relation.getAttribute('data-relation-id')!);
@@ -253,7 +264,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       setView((v) => ({ ...v, x: g.vx + e.clientX - g.sx, y: g.vy + e.clientY - g.sy }));
       return;
     }
-    if (g.id === map.roots[0].id || g.id === editingId) return;
+    if (g.id === map.roots[0].id || g.id === editingId || props.readOnly) return;
     if (!g.dragging && Math.hypot(e.clientX - g.sx, e.clientY - g.sy) < 5) return;
     g.dragging = true;
     const p = toMap(e.clientX, e.clientY);
@@ -280,6 +291,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   const onDoubleClick = (e: React.MouseEvent) => {
     const p = toMap(e.clientX, e.clientY);
     const topicId = (e.target as Element).closest('[data-topic-id]')?.getAttribute('data-topic-id') ?? (simple ? hitTest(p.x, p.y, null)?.id : undefined);
+    if (props.readOnly) return;
     if (topicId) props.onStartEdit(topicId);
     else if (!(e.target as Element).closest('[data-relation-id]')) props.onCreateFloating(toMap(e.clientX, e.clientY));
   };
@@ -323,6 +335,19 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
             viewport={viewport}
             simple={simple}
           />}
+          {props.peers?.map((p) => {
+            const b = p.selectedId ? layout.byId.get(p.selectedId) : undefined;
+            if (!b) return null;
+            return (
+              <g key={p.id} style={{ pointerEvents: 'none' }}>
+                <rect x={b.x - b.w / 2 - 7} y={b.y - b.h / 2 - 7} width={b.w + 14} height={b.h + 14} rx={12} fill="none" stroke={p.color} strokeWidth={2} />
+                <rect x={b.x - b.w / 2 - 7} y={b.y - b.h / 2 - 25} width={p.name.length * 7 + 12} height={18} rx={5} fill={p.color} />
+                <text x={b.x - b.w / 2 - 1} y={b.y - b.h / 2 - 12} fontSize={11} fontWeight={600} fill="#fff" fontFamily="'Plus Jakarta Sans', system-ui, sans-serif">
+                  {p.name}
+                </text>
+              </g>
+            );
+          })}
           {props.relationFrom && pointer && layout.byId.get(props.relationFrom) && (
             <line
               x1={layout.byId.get(props.relationFrom)!.x}

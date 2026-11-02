@@ -4,7 +4,8 @@ import { IdbStore } from '../sync/idbStore';
 import { LocalMapStore } from '../sync/localStore';
 import type { LibraryStore } from '../sync/types';
 import { sync, withSyncHooks } from '../sync/controller';
-import { parseConnectLink } from '../sync/keizuServer';
+import { KeizuServerAdapter, parseConnectLink, type SharedMap } from '../sync/keizuServer';
+import type { SharedRef } from './useLive';
 import { SyncSettings } from './SyncSettings';
 import { Editor } from './Editor';
 import { Home } from './Home';
@@ -15,8 +16,21 @@ import { getLang, t, useLang } from '../i18n';
 
 export function App() {
   const [store, setStore] = useState<LibraryStore | null>(null);
-  const [open, setOpenState] = useState<{ map: MindMap; focusId?: string } | null>(null);
+  const [open, setOpenState] = useState<{ map: MindMap; focusId?: string; shared?: SharedRef } | null>(null);
   const setOpen = useCallback((map: MindMap | null, focusId?: string) => setOpenState(map ? { map, focusId } : null), []);
+
+  /** Opens a map someone shared with this account: it is read from the server, not the library. */
+  const openShared = useCallback(async (m: SharedMap) => {
+    const a = await sync.adapter();
+    if (!(a instanceof KeizuServerAdapter)) return;
+    try {
+      const map = await a.getShared(m.ownerId, m.id);
+      if (!map) return setNotice(t('home.sharedGone'));
+      setOpenState({ map, shared: { ownerId: m.ownerId, owner: m.owner, role: m.role } });
+    } catch (e) {
+      setNotice((e as Error).message);
+    }
+  }, []);
   // Re-render everything when the interface language changes.
   useLang();
   useEffect(() => {
@@ -54,7 +68,7 @@ export function App() {
   }, [open]);
 
   // An open map is only pushed by sync, never replaced under the editor.
-  const openId = open?.map.id;
+  const openId = open?.shared ? undefined : open?.map.id;
   useEffect(() => {
     if (!openId) return;
     sync.setBusy(openId, true);
@@ -135,8 +149,20 @@ export function App() {
     );
   }
   return open ? (
-    <Editor key={open.map.id} initial={open.map} focusId={open.focusId} store={store} fontsReady={fontsReady} onBack={() => setOpen(null)} />
+    <Editor
+      key={`${open.shared?.ownerId ?? ''}:${open.map.id}`}
+      initial={open.map}
+      shared={open.shared}
+      focusId={open.focusId}
+      store={store}
+      fontsReady={fontsReady}
+      onBack={() => setOpen(null)}
+      onOpenMap={async (id, topicId) => {
+        const m = await store.get(id);
+        if (m) setOpen(m, topicId);
+      }}
+    />
   ) : (
-    <Home store={store} onOpen={setOpen} onSettings={() => setSettings(true)} onOpenFiles={openFiles} notice={notice} onNoticeShown={() => setNotice(null)} />
+    <Home store={store} onOpen={setOpen} onOpenShared={openShared} onSettings={() => setSettings(true)} onOpenFiles={openFiles} notice={notice} onNoticeShown={() => setNotice(null)} />
   );
 }
