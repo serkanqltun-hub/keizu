@@ -354,7 +354,7 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
           <button className="ib" aria-label="Haritalara dön" title="Haritalara dön" onClick={onBack}>
             <I.Menu size={20} />
           </button>
-          <div className="logo-mark"><I.Logo /></div>
+          <div className="logo-mark"><I.Logo size={28} /></div>
           <div className="doc-title">
             <span className="name">{map.title}</span>
             {link && fileState === 'needs-permission' ? (

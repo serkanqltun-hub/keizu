@@ -1,4 +1,9 @@
-# Keizu
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/brand/keizu-lockup-dark.svg">
+    <img src="docs/brand/keizu-lockup.svg" alt="Keizu" height="56">
+  </picture>
+</h1>
 
 Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve masaüstünde (Windows, macOS, Linux) aynı kodla çalışır. Hesap, bulut ya da sunucu gerekmez: haritaların cihazında kalır. İstersen ileride kendi sunucunu bağlayıp cihazlar arası senkron ve ücretsiz ortak çalışma kazanırsın.
 

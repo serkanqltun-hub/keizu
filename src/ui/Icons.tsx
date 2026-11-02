@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { KEI_PATH, TAG_HEIGHT, TAG_PATH, WORD_PATH, WORD_WIDTH } from './brandPaths';
 
 function Svg({ size = 18, children, dash }: { size?: number; children: ReactNode; dash?: boolean }) {
   return (
@@ -21,14 +22,28 @@ function Svg({ size = 18, children, dash }: { size?: number; children: ReactNode
 
 type P = { size?: number };
 
-export const Logo = ({ size = 18 }: P) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" aria-hidden="true">
-    <circle cx="6" cy="12" r="2.6" />
-    <circle cx="18" cy="6" r="2.2" />
-    <circle cx="18" cy="18" r="2.2" />
-    <path d="M8.6 12c3.6 0 3.6-6 7.2-6M8.6 12c3.6 0 3.6 6 7.2 6" />
+/** App mark: the kanji 系 (kei, "lineage") with an indigo node. Colors come from --logo-* in app.css. */
+export const Logo = ({ size = 28 }: P) => (
+  <svg width={size} height={size} viewBox="0 0 64 64" aria-hidden="true" className="logo-svg">
+    <rect width="64" height="64" rx="15" fill="var(--logo-bg)" />
+    <path fill="#fff" d={KEI_PATH} />
+    <circle cx="51" cy="50.5" r="3.8" fill="var(--logo-dot)" />
   </svg>
 );
+
+/** Wordmark: "keizu" with a vertical ケイズ tag. Height in px; width follows. */
+export const Wordmark = ({ size = 22 }: P) => {
+  const w = WORD_WIDTH + 22;
+  return (
+    <svg height={size} width={(size * w) / 52} viewBox={`0 0 ${w} 52`} role="img" aria-label="keizu">
+      <path fill="currentColor" d={WORD_PATH} />
+      <g transform={`translate(${WORD_WIDTH + 8} 4)`}>
+        <rect width="14" height={TAG_HEIGHT} rx="3.5" fill="var(--logo-tag)" />
+        <path fill="var(--logo-tag-ink)" d={TAG_PATH} />
+      </g>
+    </svg>
+  );
+};
 export const Menu = (p: P) => <Svg {...p}><path d="M4 7h16M4 12h16M4 17h16" /></Svg>;
 export const Undo = (p: P) => <Svg {...p}><path d="M9 6L4 11l5 5" /><path d="M4 11h10a5 5 0 0 1 0 10h-2" /></Svg>;
 export const Redo = (p: P) => <Svg {...p}><path d="M15 6l5 5-5 5" /><path d="M20 11H10a5 5 0 0 0 0 10h2" /></Svg>;
