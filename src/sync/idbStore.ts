@@ -4,10 +4,10 @@
 
 import { contentHash, versionsToDrop } from '../core/versions';
 import { countAll, normalizeMap, type MindMap } from '../core/model';
-import type { FileLink, LibraryStore, MapSummary, VersionInfo, VersionReason } from './types';
+import type { FileLink, LibraryStore, MapSummary, SyncRecord, VersionInfo, VersionReason } from './types';
 
 const DB_NAME = 'keizu';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const LEGACY_PREFIX = 'keizu:map:';
 
 interface VersionRow extends Omit<VersionInfo, 'id'> {
@@ -64,6 +64,7 @@ export function openKeizuDb(factory: IDBFactory = indexedDB, legacy?: Storage): 
           /* no localStorage */
         }
       }
+      if (e.oldVersion < 2) db.createObjectStore('sync', { keyPath: 'id' });
     };
     open.onsuccess = () => resolve(open.result);
     open.onerror = () => reject(open.error);
@@ -161,5 +162,29 @@ export class IdbStore implements LibraryStore {
   async findByPath(path: string): Promise<string | undefined> {
     const row = (await req(this.store('links').index('path').get(path))) as LinkRow | undefined;
     return row?.mapId;
+  }
+
+  // ---------- sync state ----------
+
+  async listSync(): Promise<SyncRecord[]> {
+    return (await req(this.store('sync').getAll())) as SyncRecord[];
+  }
+
+  async putSync(record: SyncRecord): Promise<void> {
+    const tx = this.db.transaction('sync', 'readwrite');
+    tx.objectStore('sync').put(record);
+    await done(tx);
+  }
+
+  async deleteSync(id: string): Promise<void> {
+    const tx = this.db.transaction('sync', 'readwrite');
+    tx.objectStore('sync').delete(id);
+    await done(tx);
+  }
+
+  async clearSync(): Promise<void> {
+    const tx = this.db.transaction('sync', 'readwrite');
+    tx.objectStore('sync').clear();
+    await done(tx);
   }
 }

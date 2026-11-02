@@ -70,8 +70,39 @@ fn is_map_file(arg: &str) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let from_args: Vec<String> = std::env::args().skip(1).filter(|a| is_map_file(a)).collect();
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // A second launch (a double-clicked file, or a keizu://connect link on
+    // Windows and Linux) hands its arguments to the running window instead.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            use tauri::{Emitter, Manager};
+            let files: Vec<String> = argv.iter().skip(1).filter(|a| is_map_file(a)).cloned().collect();
+            if !files.is_empty() {
+                if let Some(state) = app.try_state::<PendingFiles>() {
+                    state.0.lock().unwrap().extend(files.clone());
+                }
+                let _ = app.emit("open-files", files);
+            }
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_focus();
+            }
+        }));
+    }
+    builder
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
+        .setup(|_app| {
+            // Installed builds register keizu:// at install time; this covers
+            // development runs and AppImage on Linux, and Windows.
+            #[cfg(any(windows, target_os = "linux"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let _ = _app.deep_link().register_all();
+            }
+            Ok(())
+        })
         .manage(PendingFiles(Mutex::new(from_args)))
         .invoke_handler(tauri::generate_handler![read_file, write_file, take_opened_files])
         .build(tauri::generate_context!())

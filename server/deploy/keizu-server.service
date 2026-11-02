@@ -1,0 +1,28 @@
+# Keizu Server without Docker. Needs Node.js 22.18 or newer.
+#   sudo useradd --system --home /var/lib/keizu --create-home keizu
+#   sudo git clone https://github.com/serkanqltun-hub/keizu /opt/keizu-src
+#   cd /opt/keizu-src/server && sudo npm ci --omit=dev
+#   sudo cp deploy/keizu-server.service /etc/systemd/system/
+#   sudo systemctl enable --now keizu-server
+# Then put nginx (nginx-keizu.conf) or Caddy in front of 127.0.0.1:8787.
+[Unit]
+Description=Keizu Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=keizu
+WorkingDirectory=/opt/keizu-src/server
+Environment=KEIZU_DATA=/var/lib/keizu
+Environment=KEIZU_HOST=127.0.0.1
+Environment=KEIZU_PORT=8787
+# Environment=KEIZU_PUBLIC_URL=https://notlar.example.com
+ExecStart=/usr/bin/env node --disable-warning=ExperimentalWarning src/main.ts serve
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/keizu
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

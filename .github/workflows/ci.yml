@@ -15,6 +15,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The app's end-to-end sync test runs the real server in-process.
+      - run: npm ci --prefix server
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

@@ -1,0 +1,9 @@
+# Caddy fetches and renews the HTTPS certificate for this domain itself.
+{
+	email {$ACME_EMAIL}
+}
+
+{$KEIZU_DOMAIN} {
+	encode zstd gzip
+	reverse_proxy keizu:8787
+}

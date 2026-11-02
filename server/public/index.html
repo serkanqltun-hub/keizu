@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keizu Server</title>
+<link rel="icon" href="/icon.svg">
+<link rel="stylesheet" href="/panel.css">
+<script src="/panel.js" defer></script>
+</head>
+<body>
+<header class="top">
+  <img src="/icon.svg" alt="" width="32" height="32">
+  <strong>Keizu Server</strong>
+  <span id="ver" class="muted"></span>
+  <span class="grow"></span>
+  <span id="who" class="muted"></span>
+  <button id="logout" class="btn" hidden>Çıkış</button>
+</header>
+
+<main>
+  <section id="login" class="card narrow" hidden>
+    <h1>Panele giriş</h1>
+    <p class="muted">Haritalar Keizu uygulamasında düzenlenir. Bu panel hesabını, cihazlarını ve (yöneticiysen) kullanıcıları yönetmek içindir.</p>
+    <form id="login-form">
+      <label>Kullanıcı adı <input name="username" autocomplete="username" required></label>
+      <label>Şifre <input name="password" type="password" autocomplete="current-password" required></label>
+      <button class="btn primary">Giriş yap</button>
+      <p id="login-err" class="err" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="invite" class="card narrow" hidden>
+    <h1 id="inv-title">Keizu hesabını oluştur</h1>
+    <p id="inv-intro" class="muted">Bu davet linki yalnız bir kez kullanılabilir. Kullanıcı adını ve şifreni sen seç; şifreni kimse (sunucu yöneticisi de) göremez.</p>
+    <form id="invite-form">
+      <label id="inv-user-label">Kullanıcı adı <input name="username" autocomplete="username" pattern="[A-Za-z0-9._\-]{2,40}" title="2-40 karakter: harf, rakam, nokta, tire, alt çizgi"></label>
+      <label>Şifre <input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Şifre (tekrar) <input name="password2" type="password" autocomplete="new-password" minlength="8" required></label>
+      <button class="btn primary" id="inv-submit">Hesabı oluştur</button>
+      <p id="inv-err" class="err" role="alert"></p>
+    </form>
+  </section>
+
+  <section id="welcome" class="card" hidden>
+    <h2>Hazırsın</h2>
+    <p>Keizu uygulamasında <b>Ayarlar → Bulut senkronu</b> bölümüne bu sunucunun adresini (<code id="welcome-server"></code>) yaz ve az önce seçtiğin kullanıcı adı ile şifreyle bağlan. Ya da aşağıdan bir eşleştirme kodu üret.</p>
+  </section>
+
+  <div id="app" hidden>
+    <div class="grid">
+      <section class="card">
+        <h2>Cihaz ekle</h2>
+        <p class="muted">Yeni bir bilgisayarda veya telefonda Keizu'yu bu hesaba bağlamak için tek kullanımlık bir kod üret. Keizu'da <b>Ayarlar → Bulut senkronu → Eşleştirme kodu</b>.</p>
+        <button id="pair" class="btn primary">Kod üret</button>
+        <div id="pair-out" class="pair" hidden>
+          <img id="pair-qr" alt="Eşleştirme QR kodu" width="160" height="160">
+          <div>
+            <div class="code" id="pair-code"></div>
+            <div class="muted" id="pair-exp"></div>
+            <div class="muted small">Sunucu adresi: <code id="pair-server"></code></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Hesabım</h2>
+        <p id="usage" class="muted"></p>
+        <form id="pw-form">
+          <label>Mevcut şifre <input name="current" type="password" autocomplete="current-password" required></label>
+          <label>Yeni şifre <input name="next" type="password" autocomplete="new-password" minlength="8" required></label>
+          <button class="btn">Şifreyi değiştir</button>
+          <p id="pw-msg" class="small" role="status"></p>
+        </form>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>Cihazlarım</h2>
+      <p class="muted">Bu hesaba bağlı cihazlar. Kaybettiğin bir cihazın erişimini buradan kaldırabilirsin.</p>
+      <div class="table"><table><thead><tr><th>Cihaz</th><th>Eklendi</th><th>Son kullanım</th><th></th></tr></thead><tbody id="devices"></tbody></table></div>
+    </section>
+
+    <section class="card">
+      <h2>Çöp kutusu</h2>
+      <p class="muted">Silinen haritalar 30 gün burada kalır. Geri yüklenen harita cihazlarına bir sonraki eşitlemede döner.</p>
+      <div class="table"><table><thead><tr><th>Harita</th><th>Silindi</th><th></th></tr></thead><tbody id="trash"></tbody></table></div>
+    </section>
+
+    <section id="admin" class="card" hidden>
+      <h2>Kullanıcılar <span class="badge">yönetici</span></h2>
+      <p id="storage" class="muted"></p>
+      <p class="muted">Yeni hesaplar yalnız davetle açılır. Davet linkini kişiye gönder; kullanıcı adını ve şifresini kendisi seçer. Şifreleri kimse göremez.</p>
+      <form id="add-form" class="row">
+        <label>Kime (not) <input name="note" maxlength="100" placeholder="ör. Ayşe"></label>
+        <label>Kota (MB; boş = varsayılan, 0 = sınırsız) <input name="quota" type="number" min="0"></label>
+        <label class="check"><input name="admin" type="checkbox"> Yönetici</label>
+        <button class="btn primary">Davet linki oluştur</button>
+      </form>
+      <div id="add-out" class="linkbox" hidden><code id="add-link"></code><button type="button" class="btn" id="add-copy">Kopyala</button></div>
+      <p id="add-msg" class="small" role="status"></p>
+      <h3>Bekleyen davetler</h3>
+      <div class="table"><table><thead><tr><th>Tür</th><th>Kime</th><th>Son geçerlilik</th><th></th></tr></thead><tbody id="invites"></tbody></table></div>
+      <h3>Hesaplar</h3>
+      <div class="table"><table><thead><tr><th>Kullanıcı</th><th>Harita</th><th>Kullanım</th><th>Kota (MB)</th><th>Cihaz</th><th></th></tr></thead><tbody id="users"></tbody></table></div>
+      <h3>Yedek</h3>
+      <p class="muted">Sunucu her gün kendiliğinden yedek alır (veri klasöründe <code>backups/</code>). İstersen şimdi bir kopya indir.</p>
+      <button id="backup" class="btn">Yedeği indir</button>
+    </section>
+  </div>
+</main>
+</body>
+</html>

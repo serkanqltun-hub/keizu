@@ -1,0 +1,24 @@
+{
+  "name": "keizu-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Keizu Server: isteğe bağlı, kendi sunucunda çalışan senkron sunucusu.",
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "bin": { "keizu-server": "src/main.ts" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/main.ts serve",
+    "dev": "KEIZU_DATA=./data node --disable-warning=ExperimentalWarning --watch src/main.ts serve",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.ts",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/qrcode": "^1.5.5",
+    "typescript": "^5.9.3"
+  }
+}

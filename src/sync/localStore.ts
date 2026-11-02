@@ -3,7 +3,7 @@
 // last for the session only.
 
 import { normalizeMap, type MindMap } from '../core/model';
-import type { FileLink, LibraryStore, MapSummary, VersionInfo } from './types';
+import type { FileLink, LibraryStore, MapSummary, SyncRecord, VersionInfo } from './types';
 
 const PREFIX = 'keizu:map:';
 
@@ -17,6 +17,7 @@ function safe<T>(fn: () => T, fallback: T): T {
 
 export class LocalMapStore implements LibraryStore {
   private links = new Map<string, FileLink>();
+  private syncState = new Map<string, SyncRecord>();
 
   constructor(private storage: Storage = globalThis.localStorage) {}
 
@@ -70,5 +71,23 @@ export class LocalMapStore implements LibraryStore {
   async findByPath(path: string) {
     for (const [id, l] of this.links) if (l.kind === 'path' && l.path === path) return id;
     return undefined;
+  }
+
+  // Sync state lasts for the session only, like file links: after a reload
+  // the next sync compares content and adopts identical maps.
+  async listSync() {
+    return [...this.syncState.values()];
+  }
+
+  async putSync(r: SyncRecord) {
+    this.syncState.set(r.id, r);
+  }
+
+  async deleteSync(id: string) {
+    this.syncState.delete(id);
+  }
+
+  async clearSync() {
+    this.syncState.clear();
   }
 }
