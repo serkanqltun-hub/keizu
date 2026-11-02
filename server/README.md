@@ -6,6 +6,7 @@ Keizu için isteğe bağlı senkron sunucusu. Kurulum rehberi: [docs/server/hetz
 - Tek dosyalık veritabanı (`$KEIZU_DATA/keizu.db`), günlük yedek (`$KEIZU_DATA/backups`).
 - Haritalar sunucu için opak JSON belgeleridir; her kayıt yeni bir sürüm numarası alır. Eski bir sürüme dayanan kayıt `409` ile reddedilir ve uygulama birleştirir.
 - Görseller kullanıcı başına bir kez saklanır (`blob:<sha256>`); sürüm geçmişi onları kopyalamaz.
+- Docker imajı Keizu web uygulamasını da içerir: sunucunun adresi (`/`) uygulamanın kendisini, `/panel/` hesap ve yönetim panelini açar. İmaj depo kökünden derlenir: `docker build -f server/Dockerfile .`
 
 ## Geliştirme
 
@@ -25,6 +26,7 @@ Uygulamanın uçtan uca testi (`src/sync/server.e2e.test.ts`) bu sunucuyu aynı 
 | `KEIZU_DATA` | `/data` | Veritabanı ve yedek klasörü |
 | `KEIZU_PORT` / `KEIZU_HOST` | `8787` / `0.0.0.0` | Dinlenen adres |
 | `KEIZU_PUBLIC_URL` | `https://$KEIZU_DOMAIN` | Davet ve eşleştirme linklerinde kullanılan genel adres |
+| `KEIZU_WEB` | `/app/web` (imajda) | `/` adresinde sunulan web uygulaması klasörü. Boş bırakılırsa `/` panele yönlenir |
 | `KEIZU_TRUST_PROXY` | `1` | `X-Forwarded-*` başlıklarına güven (ters vekil arkasında). Doğrudan internete açıksa `0`. |
 | `KEIZU_DEFAULT_QUOTA_MB` | `2048` | Yeni kullanıcı kotası (0 = sınırsız) |
 | `KEIZU_MAX_IMAGE_MB` | `5` | Tek görsel üst sınırı |

@@ -11,9 +11,9 @@ export const CLIENT_API = 1;
 export const MIN_SERVER_API = 1;
 
 export interface ServerInfo {
-  /** Where the server lives, e.g. https://notlar.example.com */
+  /** Where the server lives, e.g. https://keizu.example.com */
   server: string;
-  /** Absolute API base, e.g. https://notlar.example.com/api/v1 */
+  /** Absolute API base, e.g. https://keizu.example.com/api/v1 */
   api: string;
   name: string;
   version: string;
@@ -28,7 +28,7 @@ export interface Session {
   user: { id: number; username: string; admin: boolean };
 }
 
-/** "notlar.example.com" → "https://notlar.example.com". Keeps http:// when typed. */
+/** "keizu.example.com" → "https://keizu.example.com". Keeps http:// when typed. */
 export function normalizeServer(input: string): string {
   let s = input.trim();
   if (!s) throw new Error('Sunucu adresi boş.');

@@ -1,7 +1,8 @@
 # Keizu Server kurulumu (Hetzner ve diğer Linux sunucular)
 
-Keizu sunucusuz da tam çalışır; haritaların her zaman önce cihazında saklanır. Keizu Server isteğe bağlıdır ve sana şunları kazandırır:
+Keizu sunucusuz da tam çalışır; haritaların her zaman önce cihazında saklanır. Sunucusu olmayanlar Keizu'yu tarayıcıda **https://serkanqltun-hub.github.io/keizu/** adresinden ya da masaüstü uygulamasıyla kullanır. Keizu Server isteğe bağlıdır ve sana şunları kazandırır:
 
+- Uygulama kendi adresinde açılır: `https://keizu.alanadin.com` Keizu'nun kendisidir, yönetim paneli `https://keizu.alanadin.com/panel/` adresindedir.
 - Haritaların bilgisayarların, tarayıcıların ve (ileride) telefonun arasında eşitlenir.
 - Her kaydın eski sürümleri sunucuda saklanır, silinen haritalar 30 gün çöp kutusunda kalır.
 - Ailen veya ekibin için davetle hesap açabilirsin. Herkesin haritaları ayrıdır.
@@ -28,7 +29,7 @@ Bu rehber Hetzner Cloud üzerinden anlatıyor; Ubuntu veya Debian çalışan her
 ## 1. Gerekenler
 
 - Ubuntu 22.04/24.04 veya Debian 12 çalışan bir sunucu. Hetzner'de en küçük plan (ör. CX22, 2 vCPU / 4 GB RAM / 40 GB disk) fazlasıyla yeter.
-- Bir alan adı ve onun DNS ayarlarına erişim. Keizu için bir alt alan adı kullanacağız, örneğin `notlar.alanadin.com`.
+- Bir alan adı ve onun DNS ayarlarına erişim. Keizu için bir alt alan adı kullanacağız, örneğin `keizu.alanadin.com`.
 - Sunucuya SSH ile bağlanabilmek (`ssh root@SUNUCU_IP` veya sudo yetkili bir kullanıcı).
 
 ## 2. Sunucu ve alan adı
@@ -41,12 +42,12 @@ Bu rehber Hetzner Cloud üzerinden anlatıyor; Ubuntu veya Debian çalışan her
 
 | Tür | Ad | Değer | TTL |
 | --- | --- | --- | --- |
-| A | `notlar` | `SUNUCU_IPV4` | 300 |
+| A | `keizu` | `SUNUCU_IPV4` | 300 |
 
 Sunucunun IPv6 adresi varsa aynı ad için bir **AAAA** kaydı da ekleyebilirsin. Kaydın yayıldığını kendi bilgisayarından kontrol et:
 
 ```bash
-ping notlar.alanadin.com      # yanıt sunucunun IP'sinden gelmeli
+ping keizu.alanadin.com      # yanıt sunucunun IP'sinden gelmeli
 ```
 
 ## 3. Tek komutla kurulum
@@ -72,7 +73,7 @@ Seçenekleri baştan verebilirsin:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/serkanqltun-hub/keizu/main/server/deploy/install.sh \
-  | sudo bash -s -- --domain notlar.alanadin.com --email sen@alanadin.com
+  | sudo bash -s -- --domain keizu.alanadin.com --email sen@alanadin.com
 ```
 
 | Seçenek | Anlamı |
@@ -90,7 +91,7 @@ Sunucunda 80/443 portlarını başka bir site için kullanan bir nginx varsa bet
 
 1. Keizu'yu yalnız sunucunun içinden erişilebilen `127.0.0.1:8787` adresinde başlatır (dışarıya port açmaz).
 2. "nginx bulundu, site yapılandırması eklensin mi?" diye sorar. **Evet** dersen:
-   - `/etc/nginx/sites-available/keizu-notlar.alanadin.com.conf` dosyasını yazar ve etkinleştirir,
+   - `/etc/nginx/sites-available/keizu-keizu.alanadin.com.conf` dosyasını yazar ve etkinleştirir,
    - `nginx -t` ile test eder (hata olursa değişikliği geri alır), sonra nginx'i yeniden yükler,
    - `certbot` kuruluysa HTTPS sertifikasını alır ve HTTP'yi HTTPS'e yönlendirir.
 
@@ -100,7 +101,7 @@ Diğer sitelerine dokunmaz. **Hayır** dersen eklenecek bloğu ekrana yazar. Ell
 server {
     listen 80;
     listen [::]:80;
-    server_name notlar.alanadin.com;
+    server_name keizu.alanadin.com;
     client_max_body_size 50m;          # görselli haritalar büyük olabilir
 
     location / {
@@ -120,12 +121,12 @@ sudo nano /etc/nginx/sites-available/keizu.conf        # yukarıdaki blok
 sudo ln -s /etc/nginx/sites-available/keizu.conf /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 sudo apt install -y certbot python3-certbot-nginx       # yoksa
-sudo certbot --nginx -d notlar.alanadin.com --redirect
+sudo certbot --nginx -d keizu.alanadin.com --redirect
 ```
 
 **Başka bir ters vekil kullanıyorsan:**
 
-- Caddy: `notlar.alanadin.com { reverse_proxy 127.0.0.1:8787 }`
+- Caddy: `keizu.alanadin.com { reverse_proxy 127.0.0.1:8787 }`
 - Traefik / Nginx Proxy Manager: hedef olarak `http://127.0.0.1:8787` (veya Docker ağındaki `keizu:8787`) ver.
 
 > 80/443 doluyken hangi programın kullandığını görmek için: `sudo ss -ltnp '( sport = :80 or sport = :443 )'`
@@ -139,12 +140,13 @@ Kurulumun sonunda şuna benzer bir çıktı görürsün:
  aşağıdaki linki tarayıcıda aç; kullanıcı adını ve şifreni sen seç.
 
 Davet linki (7 gün geçerli, tek kullanımlık):
-  https://notlar.alanadin.com/#davet=…
+  https://keizu.alanadin.com/panel/#davet=…
 ```
 
 1. Linki tarayıcıda aç, **kullanıcı adını ve şifreni seç**. Bu senin yönetici hesabın. Şifren sunucuda geri çözülemeyen bir özet (scrypt) olarak saklanır; kimse göremez.
 2. Linki kaybettiysen sunucuda `keizu-server invite --admin` ile yenisini al.
-3. Keizu uygulamasında (web veya masaüstü): ana ekranın solundaki **Bulut senkronu** → **Adres ile** → `notlar.alanadin.com` yaz → **Bul**. "Keizu Server 1.0 bulundu" çıkınca kullanıcı adı ve şifrenle **Bağlan**.
+3. Tarayıcıda `https://keizu.alanadin.com` adresini aç: Keizu açılır. Ana ekranın solundaki **Bulut senkronu**'na tıkla; sunucu adresi hazır dolu gelir, kullanıcı adı ve şifrenle **Bağlan**.
+4. Masaüstü uygulamasında veya başka bir adresteki Keizu'da: **Bulut senkronu** → **Adres ile** → `keizu.alanadin.com` yaz → **Bul**. "Keizu Server 1.0 bulundu" çıkınca kullanıcı adı ve şifrenle **Bağlan**.
 
 Uygulama şifreni saklamaz; yalnız o cihaza özel bir anahtar (token) alır. Başka bir cihazı bağlamanın iki kolay yolu daha var:
 
@@ -157,7 +159,7 @@ Bağlandıktan sonra haritaların her değişiklikten birkaç saniye sonra ve da
 
 Açık kayıt yoktur; hesaplar yalnız davetle açılır.
 
-- **Davet:** Panel (`https://notlar.alanadin.com`) → *Kullanıcılar* → kime olduğunu not et, isteğe bağlı kota ver → **Davet linki oluştur**. Linki kişiye gönder; kullanıcı adını ve şifresini kendisi seçer. Link 7 gün geçerlidir ve tek kullanımlıktır. Kullanılmamış davetleri aynı yerden iptal edebilirsin.
+- **Davet:** Panel (`https://keizu.alanadin.com/panel/`) → *Kullanıcılar* → kime olduğunu not et, isteğe bağlı kota ver → **Davet linki oluştur**. Linki kişiye gönder; kullanıcı adını ve şifresini kendisi seçer. Link 7 gün geçerlidir ve tek kullanımlıktır. Kullanılmamış davetleri aynı yerden iptal edebilirsin.
 - **Şifre sıfırlama:** Kullanıcının satırında **Sıfırlama linki**. Yeni şifreyi kullanıcı kendisi belirler; ardından tüm cihazlarının oturumu kapanır.
 - **Gizlilik:** Her kullanıcının haritaları ayrıdır. Yönetici dahil kimse başkasının haritasını uygulamada göremez. Harita paylaşımı ve ortak çalışma sonraki sürümde gelecek.
 - **Cihazlar:** Herkes kendi panelinde bağlı cihazlarını görür ve kaybolan bir cihazın erişimini kaldırabilir.
@@ -256,8 +258,8 @@ sudo curl -fsSLO https://raw.githubusercontent.com/serkanqltun-hub/keizu/main/se
 sudo curl -fsSLO https://raw.githubusercontent.com/serkanqltun-hub/keizu/main/server/deploy/Caddyfile
 sudo chown 1000:1000 data
 sudo tee .env >/dev/null <<'EOF'
-KEIZU_DOMAIN=notlar.alanadin.com
-KEIZU_PUBLIC_URL=https://notlar.alanadin.com
+KEIZU_DOMAIN=keizu.alanadin.com
+KEIZU_PUBLIC_URL=https://keizu.alanadin.com
 KEIZU_PORT=8787
 COMPOSE_PROFILES=caddy        # mevcut nginx kullanacaksan boş bırak
 EOF
@@ -271,11 +273,11 @@ sudo docker compose logs keizu     # yönetici davet linki burada
 
 | Belirti | Çözüm |
 | --- | --- |
-| Uygulama "Bu adreste bir Keizu Server bulunamadı" diyor | Tarayıcıda `https://notlar.alanadin.com/.well-known/keizu` aç; JSON görmelisin. Görmüyorsan ters vekil yönlendirmesini ve `keizu-server status` çıktısını kontrol et. |
-| "Sunucuya ulaşılamadı" | DNS kaydı, güvenlik duvarında 443 ve sertifika. `curl -I https://notlar.alanadin.com` |
+| Uygulama "Bu adreste bir Keizu Server bulunamadı" diyor | Tarayıcıda `https://keizu.alanadin.com/.well-known/keizu` aç; JSON görmelisin. Görmüyorsan ters vekil yönlendirmesini ve `keizu-server status` çıktısını kontrol et. |
+| "Sunucuya ulaşılamadı" | DNS kaydı, güvenlik duvarında 443 ve sertifika. `curl -I https://keizu.alanadin.com` |
 | Caddy sertifika alamıyor | A kaydı bu sunucuyu göstermiyor ya da 80 portu kapalı. `docker compose -f /opt/keizu/docker-compose.yml logs caddy` |
 | Görselli harita gönderilemiyor (413) | nginx'te `client_max_body_size 50m;` satırı eksik, ya da görsel `KEIZU_MAX_IMAGE_MB` sınırını aşıyor. |
 | "Sunucunun depolama alanı doldu" (507) | `KEIZU_TOTAL_LIMIT_GB` sınırına gelindi ya da diskte 2 GB'tan az yer kaldı. Eski yedekleri sil veya sınırı artır. |
-| Davet linki localhost gösteriyor | `.env` içinde `KEIZU_PUBLIC_URL=https://notlar.alanadin.com` olmalı; sonra `keizu-server restart` ve `keizu-server invite`. |
+| Davet linki localhost gösteriyor | `.env` içinde `KEIZU_PUBLIC_URL=https://keizu.alanadin.com` olmalı; sonra `keizu-server restart` ve `keizu-server invite`. |
 | Hazır imaj indirilemiyor | Betik kaynak koddan derlemeye geçer. Elle denemek için: `install.sh --build`. |
 | Web uygulamasında WebDAV çalışmıyor | WebDAV sunucusunun CORS izni vermesi gerekir. Masaüstü uygulamasında bu kısıt yoktur. |

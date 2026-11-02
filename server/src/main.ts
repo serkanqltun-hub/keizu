@@ -11,7 +11,8 @@
 //   keizu-server version
 
 import { statSync, statfsSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 import { openDb, type Db } from './db.ts';
 import { createApp, SERVER_VERSION, type Config } from './app.ts';
@@ -25,6 +26,9 @@ const DB_FILE = join(DATA, 'keizu.db');
 const BACKUP_DIR = join(DATA, 'backups');
 const PUBLIC_URL = env.KEIZU_PUBLIC_URL?.trim() || (env.KEIZU_DOMAIN ? `https://${env.KEIZU_DOMAIN.trim()}` : undefined);
 
+// The built web app: bundled into the Docker image at /app/web. Empty KEIZU_WEB turns it off.
+const WEB_DIR = env.KEIZU_WEB ?? join(dirname(fileURLToPath(import.meta.url)), '..', 'web');
+
 const log = (msg: string) => console.log(`${new Date().toISOString()} ${msg}`);
 
 function flag(args: string[], name: string): string | true | undefined {
@@ -32,6 +36,15 @@ function flag(args: string[], name: string): string | true | undefined {
   if (i < 0) return undefined;
   const v = args[i + 1];
   return v && !v.startsWith('--') ? v : true;
+}
+
+function hasWebApp(dir: string): boolean {
+  if (!dir) return false;
+  try {
+    return statSync(join(dir, 'index.html')).isFile();
+  } catch {
+    return false;
+  }
 }
 
 function linkBase(): string {
@@ -111,7 +124,9 @@ async function serve() {
       return s.bavail * s.bsize;
     },
     log,
+    webDir: hasWebApp(WEB_DIR) ? WEB_DIR : undefined,
   };
+  log(cfg.webDir ? `Web uygulaması: ${cfg.webDir}` : 'Web uygulaması yok; adres yönetim paneline açılır.');
   const port = Number(env.KEIZU_PORT ?? 8787);
   const host = env.KEIZU_HOST ?? '0.0.0.0';
   const server = createApp(cfg);

@@ -4,7 +4,7 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { readFileSync, createReadStream, rmSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
@@ -53,7 +53,7 @@ export interface Config {
   /** Trust X-Forwarded-For / X-Forwarded-Proto (set when behind a reverse proxy). */
   trustProxy: boolean;
   maxBodyBytes: number;
-  /** Public address, e.g. https://notlar.example.com. Guessed from the request when empty. */
+  /** Public address, e.g. https://keizu.example.com. Guessed from the request when empty. */
   publicUrl?: string;
   /** Default quota for new users, in bytes (0 = unlimited). */
   defaultQuotaBytes: number;
@@ -66,6 +66,8 @@ export interface Config {
   /** Free bytes on the data disk. */
   freeBytes?: () => number;
   log?: (msg: string) => void;
+  /** Built web app (the Keizu editor) served at "/". Without it "/" opens the panel. */
+  webDir?: string;
 }
 
 class HttpError extends Error {
@@ -114,18 +116,36 @@ function add(method: string, path: string, auth: Route['auth'], fn: Handler | Pu
 // ---------- helpers ----------
 
 const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
-const STATIC: Record<string, string> = {
-  '/': 'index.html',
-  '/panel.js': 'panel.js',
-  '/panel.css': 'panel.css',
-  '/icon.svg': 'icon.svg',
+// The admin/account panel lives under /panel/; the web app (if bundled) at "/".
+const PANEL: Record<string, string> = {
+  '/panel/': 'index.html',
+  '/panel/panel.js': 'panel.js',
+  '/panel/panel.css': 'panel.css',
+  '/panel/icon.svg': 'icon.svg',
 };
 const MIME: Record<string, string> = {
   html: 'text/html; charset=utf-8',
   js: 'text/javascript; charset=utf-8',
+  mjs: 'text/javascript; charset=utf-8',
   css: 'text/css; charset=utf-8',
   svg: 'image/svg+xml',
+  json: 'application/json; charset=utf-8',
+  webmanifest: 'application/manifest+json',
+  map: 'application/json; charset=utf-8',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  ico: 'image/x-icon',
+  webp: 'image/webp',
+  woff: 'font/woff',
+  woff2: 'font/woff2',
+  txt: 'text/plain; charset=utf-8',
+  wasm: 'application/wasm',
 };
+const PANEL_CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'";
+// The editor sets inline styles and talks to whatever server the user connects to.
+const WEB_CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+  "font-src 'self' data:; connect-src 'self' https: http:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'";
 
 function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
@@ -502,16 +522,51 @@ const CORS = {
   'Access-Control-Max-Age': '86400',
 };
 
-function serveStatic(res: ServerResponse, name: string) {
-  const ext = name.split('.').pop()!;
+function serveFile(req: IncomingMessage, res: ServerResponse, file: string, size: number, csp: string, immutable = false) {
+  const ext = file.split('.').pop()!.toLowerCase();
   res.writeHead(200, {
     'Content-Type': MIME[ext] ?? 'application/octet-stream',
-    'Cache-Control': ext === 'html' ? 'no-cache' : 'max-age=3600',
-    'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'",
+    'Content-Length': String(size),
+    'Cache-Control': ext === 'html' ? 'no-cache' : immutable ? 'public, max-age=31536000, immutable' : 'max-age=3600',
+    'Content-Security-Policy': csp,
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
   });
-  createReadStream(join(PUBLIC_DIR, name)).pipe(res);
+  if (req.method === 'HEAD') return res.end();
+  createReadStream(file).pipe(res);
+}
+
+function fileSize(file: string): number | undefined {
+  try {
+    const st = statSync(file);
+    return st.isFile() ? st.size : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Serves the web app; unknown paths without an extension get index.html. Returns false if nothing fits. */
+function serveWeb(req: IncomingMessage, res: ServerResponse, root: string, pathname: string): boolean {
+  let rel: string;
+  try {
+    rel = decodeURIComponent(pathname);
+  } catch {
+    return false;
+  }
+  const base = resolve(root);
+  let file = resolve(base, '.' + rel);
+  if (file !== base && !file.startsWith(base + sep)) return false;
+  if (rel.endsWith('/')) file = join(file, 'index.html');
+  let size = fileSize(file);
+  if (size === undefined && !/\.[\w]+$/.test(rel)) size = fileSize((file = join(base, 'index.html')));
+  if (size === undefined) return false;
+  serveFile(req, res, file, size, WEB_CSP, rel.startsWith('/assets/'));
+  return true;
+}
+
+function redirect(res: ServerResponse, to: string) {
+  res.writeHead(302, { Location: to, 'Cache-Control': 'no-cache' });
+  res.end();
 }
 
 export async function handle(cfg: Config, rawReq: IncomingMessage, res: ServerResponse) {
@@ -526,7 +581,16 @@ export async function handle(cfg: Config, rawReq: IncomingMessage, res: ServerRe
       res.writeHead(204);
       return res.end();
     }
-    if (rawReq.method === 'GET' && STATIC[url.pathname]) return serveStatic(res, STATIC[url.pathname]);
+    const isGet = rawReq.method === 'GET' || rawReq.method === 'HEAD';
+    if (isGet && !isApi) {
+      if (url.pathname === '/panel') return redirect(res, '/panel/' + url.search);
+      const panelFile = PANEL[url.pathname];
+      if (panelFile) {
+        const file = join(PUBLIC_DIR, panelFile);
+        return serveFile(rawReq, res, file, fileSize(file) ?? 0, PANEL_CSP);
+      }
+      if (!cfg.webDir && url.pathname === '/') return redirect(res, '/panel/');
+    }
     let pathMatched = false;
     for (const r of routes) {
       const m = r.pattern.exec(url.pathname);
@@ -543,6 +607,7 @@ export async function handle(cfg: Config, rawReq: IncomingMessage, res: ServerRe
       if (r.auth === 'admin' && !who.user.is_admin) throw new HttpError(403, 'forbidden', 'Bu işlem için yönetici olmalısın.');
       return await (r.fn as Handler)({ ...ctx, ...who });
     }
+    if (isGet && !isApi && !pathMatched && cfg.webDir && serveWeb(rawReq, res, cfg.webDir, url.pathname)) return;
     throw pathMatched ? new HttpError(405, 'method', 'Bu yöntem desteklenmiyor.') : new HttpError(404, 'not_found', 'Bulunamadı.');
   } catch (err) {
     if (res.headersSent) return res.destroy();

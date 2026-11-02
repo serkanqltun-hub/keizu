@@ -9,7 +9,7 @@
 # 127.0.0.1:8787 only and the script prints (or adds) an nginx site for it.
 #
 # Options (all optional; the script asks for what it needs):
-#   --domain notlar.example.com   address the server will be reached at
+#   --domain keizu.example.com   address the server will be reached at
 #   --email you@example.com       for Let's Encrypt notices (Caddy mode)
 #   --mode auto|caddy|proxy       auto: caddy if ports 80/443 are free
 #   --port 8787                   local port Keizu listens on
@@ -82,7 +82,7 @@ if [ -z "$DOMAIN" ] && [ -f "$EXISTING_ENV" ]; then
   DOMAIN="$(grep -E '^KEIZU_DOMAIN=' "$EXISTING_ENV" | cut -d= -f2- || true)"
 fi
 while [ -z "$DOMAIN" ]; do
-  DOMAIN="$(ask "Sunucunun alan adı (ör. notlar.alanadin.com)")"
+  DOMAIN="$(ask "Sunucunun alan adı (ör. keizu.alanadin.com)")"
   [ -n "$DOMAIN" ] || [ "$YES" = 0 ] || die "--domain gerekli."
 done
 DOMAIN="${DOMAIN#https://}"; DOMAIN="${DOMAIN#http://}"; DOMAIN="${DOMAIN%%/*}"
@@ -128,7 +128,7 @@ fi
 if [ "$BUILD" = 1 ]; then
   IMAGE="keizu-server:local"
   info "İmaj derleniyor (bir iki dakika sürebilir)…"
-  docker build -t "$IMAGE" "https://github.com/$REPO.git#$REF:server"
+  docker build -t "$IMAGE" -f server/Dockerfile "https://github.com/$REPO.git#$REF"
 fi
 
 umask 077
@@ -170,7 +170,7 @@ case "\$1" in
   update)
     if grep -q '^KEIZU_IMAGE=keizu-server:local' .env; then
       ref=\$(grep '^KEIZU_BUILD_REF=' .env | cut -d= -f2-)
-      docker build -t keizu-server:local "https://github.com/$REPO.git#\${ref:-main}:server" || exit 1
+      docker build -t keizu-server:local -f server/Dockerfile "https://github.com/$REPO.git#\${ref:-main}" || exit 1
     else
       docker compose pull || exit 1
     fi
@@ -264,7 +264,8 @@ else
   info "Yönetici hesabı daha önce oluşturulmuş. Yeni davet: keizu-server invite · cihaz kodu: keizu-server pair <kullanıcı>"
 fi
 echo
-info "Panel:        https://$DOMAIN  (davet oluştur, cihaz kodu üret, yedek indir)"
-info "Uygulamada:   Ayarlar → Bulut senkronu → adres: $DOMAIN"
+info "Uygulama:     https://$DOMAIN  (tarayıcıda Keizu; Ayarlar → Bulut senkronu'nda adres hazır gelir)"
+info "Panel:        https://$DOMAIN/panel/  (davet oluştur, cihaz kodu üret, yedek indir)"
+info "Masaüstü:     Ayarlar → Bulut senkronu → adres: $DOMAIN"
 info "Güncelleme:   keizu-server update"
 info "Rehber:       https://github.com/$REPO/blob/main/docs/server/hetzner.md"

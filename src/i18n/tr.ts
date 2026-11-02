@@ -277,7 +277,7 @@ export const tr = {
   'sync.tab.code': 'Eşleştirme kodu',
   'sync.tab.webdav': 'WebDAV',
   'sync.server': 'Sunucu adresi',
-  'sync.serverPlaceholder': 'notlar.alanadin.com',
+  'sync.serverPlaceholder': 'keizu.alanadin.com',
   'sync.find': 'Bul',
   'sync.finding': 'Aranıyor…',
   'sync.found': '{name} {version} bulundu',

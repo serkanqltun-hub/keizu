@@ -220,15 +220,15 @@ describe('syncOnce', () => {
 
 describe('addresses and links', () => {
   it('normalises server addresses', () => {
-    expect(normalizeServer('notlar.ornek.com')).toBe('https://notlar.ornek.com');
-    expect(normalizeServer(' https://notlar.ornek.com/ ')).toBe('https://notlar.ornek.com');
+    expect(normalizeServer('keizu.ornek.com')).toBe('https://keizu.ornek.com');
+    expect(normalizeServer(' https://keizu.ornek.com/ ')).toBe('https://keizu.ornek.com');
     expect(normalizeServer('http://192.168.1.5:8787')).toBe('http://192.168.1.5:8787');
     expect(normalizeServer('https://ornek.com/.well-known/keizu')).toBe('https://ornek.com');
     expect(() => normalizeServer('ftp://x')).toThrow();
   });
 
   it('reads keizu://connect links', () => {
-    expect(parseConnectLink('keizu://connect?server=https%3A%2F%2Fnotlar.ornek.com&code=482917')).toEqual({ server: 'https://notlar.ornek.com', code: '482917' });
+    expect(parseConnectLink('keizu://connect?server=https%3A%2F%2Fkeizu.ornek.com&code=482917')).toEqual({ server: 'https://keizu.ornek.com', code: '482917' });
     expect(parseConnectLink('keizu://connect?code=1')).toBeUndefined();
   });
 

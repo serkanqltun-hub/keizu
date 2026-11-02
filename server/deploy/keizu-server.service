@@ -16,7 +16,7 @@ WorkingDirectory=/opt/keizu-src/server
 Environment=KEIZU_DATA=/var/lib/keizu
 Environment=KEIZU_HOST=127.0.0.1
 Environment=KEIZU_PORT=8787
-# Environment=KEIZU_PUBLIC_URL=https://notlar.example.com
+# Environment=KEIZU_PUBLIC_URL=https://keizu.example.com
 ExecStart=/usr/bin/env node --disable-warning=ExperimentalWarning src/main.ts serve
 Restart=on-failure
 NoNewPrivileges=true

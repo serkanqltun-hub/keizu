@@ -1,7 +1,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, rmSync, readdirSync, utimesSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { openDb } from '../src/db.ts';
@@ -167,6 +167,7 @@ test('accounts are made by invitation; the invitee picks the password', async ()
 
   const inv = await api('/api/v1/admin/invites', { method: 'POST', token: a, body: JSON.stringify({ quotaMb: 100, note: 'Zeynep' }) });
   assert.equal(inv.status, 201);
+  assert.match(inv.json.link, /\/panel\/#davet=/);
   const token = inv.json.link.split('#davet=')[1];
   assert.ok(token.length > 20);
   assert.equal((await api('/api/v1/admin/invites', { token: a })).json.invites[0].note, 'Zeynep');
@@ -203,11 +204,48 @@ test('accounts are made by invitation; the invitee picks the password', async ()
   assert.equal(bytes.subarray(0, 15).toString(), 'SQLite format 3');
 });
 
-test('panel page is served with a strict CSP', async () => {
-  const r = await fetch(base + '/');
+test('panel lives at /panel/ with a strict CSP; / opens it when no web app is bundled', async () => {
+  const r = await fetch(base + '/panel/');
   assert.equal(r.status, 200);
   assert.match(r.headers.get('content-security-policy') ?? '', /script-src 'self'/);
-  assert.match(await r.text(), /Keizu Server/);
+  const html = await r.text();
+  assert.match(html, /Keizu Server/);
+  assert.match(html, /\/panel\/panel\.js/);
+  assert.equal((await fetch(base + '/panel/panel.js')).headers.get('content-type'), 'text/javascript; charset=utf-8');
+  const root = await fetch(base + '/', { redirect: 'manual' });
+  assert.equal(root.status, 302);
+  assert.equal(root.headers.get('location'), '/panel/');
+  const bare = await fetch(base + '/panel', { redirect: 'manual' });
+  assert.equal(bare.headers.get('location'), '/panel/');
+});
+
+test('serves the bundled web app at / with SPA fallback', async () => {
+  const web = join(dir, 'web');
+  mkdirSync(join(web, 'assets'), { recursive: true });
+  writeFileSync(join(web, 'index.html'), '<!doctype html><title>Keizu app</title>');
+  writeFileSync(join(web, 'assets', 'app-123.js'), 'console.log(1)');
+  writeFileSync(join(dir, 'secret.txt'), 'nope');
+  const app = createApp({ db, backupDir: join(dir, 'b'), trustProxy: false, maxBodyBytes: 1 << 20, defaultQuotaBytes: 0, webDir: web });
+  await new Promise<void>((r) => app.listen(0, '127.0.0.1', r));
+  const b = `http://127.0.0.1:${(app.address() as AddressInfo).port}`;
+  try {
+    const home = await fetch(b + '/');
+    assert.equal(home.status, 200);
+    assert.match(await home.text(), /Keizu app/);
+    assert.match(home.headers.get('content-security-policy') ?? '', /connect-src 'self' https: http:/);
+    const js = await fetch(b + '/assets/app-123.js');
+    assert.equal(js.headers.get('content-type'), 'text/javascript; charset=utf-8');
+    assert.match(js.headers.get('cache-control') ?? '', /immutable/);
+    assert.match(await (await fetch(b + '/harita/abc')).text(), /Keizu app/);
+    assert.equal((await fetch(b + '/assets/yok.js')).status, 404);
+    assert.equal((await fetch(b + '/%2e%2e/secret.txt')).status, 404);
+    assert.equal((await fetch(b + '/panel/')).status, 200);
+    assert.equal((await fetch(b + '/healthz')).status, 200);
+    assert.equal((await fetch(b + '/api/v1/nope')).status, 404);
+    assert.equal((await fetch(b + '/.well-known/keizu')).headers.get('content-type'), 'application/json; charset=utf-8');
+  } finally {
+    app.close();
+  }
 });
 
 test('backups rotate and old trash is purged', () => {

@@ -9,6 +9,12 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 
 *An open-source, local-first mind mapping app for the web and desktop. No account or server needed; an optional self-hosted Keizu Server adds sync between devices.*
 
+## Kullanmaya başla
+
+- **Tarayıcıda:** https://serkanqltun-hub.github.io/keizu/ (kurulum yok, haritalar tarayıcında kalır)
+- **Masaüstü:** Windows, macOS ve Linux sürümleri [Releases](https://github.com/serkanqltun-hub/keizu/releases) sayfasında
+- **Kendi sunucunla:** Keizu Server kurduysan uygulama sunucunun adresinde açılır (ör. `https://keizu.alanadin.com`)
+
 ## Durum
 
 **Faz 4 / 6: İsteğe bağlı Keizu Server.** Kullanılabilir ama erken bir sürüm. Yol haritası aşağıda.
@@ -90,7 +96,7 @@ Keizu Server tek bir Docker imajıdır (Node.js + SQLite). Hetzner veya herhangi
 curl -fsSL https://raw.githubusercontent.com/serkanqltun-hub/keizu/main/server/deploy/install.sh | sudo bash
 ```
 
-Adım adım rehber: **[docs/server/hetzner.md](docs/server/hetzner.md)**. Hesaplar yalnız davetle açılır, herkes şifresini kendisi seçer, herkesin haritaları ayrıdır. Uygulamadan adres + şifreyle, 6 haneli eşleştirme koduyla veya `keizu://connect` linkiyle bağlanılır. API ve geliştirme notları: [server/README.md](server/README.md).
+Sunucunun adresi Keizu'nun kendisini açar, bağlanma ekranında adres hazır gelir; yönetim paneli `/panel/` adresindedir. Adım adım rehber: **[docs/server/hetzner.md](docs/server/hetzner.md)**. Hesaplar yalnız davetle açılır, herkes şifresini kendisi seçer, herkesin haritaları ayrıdır. Uygulamadan adres + şifreyle, 6 haneli eşleştirme koduyla veya `keizu://connect` linkiyle bağlanılır. API ve geliştirme notları: [server/README.md](server/README.md).
 
 ## Yapı
 

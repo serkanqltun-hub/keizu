@@ -7,6 +7,7 @@ import { deviceName, httpFetch, sync, type SyncStatus } from '../sync/controller
 import type { ConflictPolicy, SyncEvent } from '../sync/engine';
 import { discover, login, pair, KeizuServerAdapter, type ServerInfo } from '../sync/keizuServer';
 import * as I from './Icons';
+import { isDesktop } from './platform';
 
 export const GUIDE_URL = 'https://github.com/serkanqltun-hub/keizu/blob/main/docs/server/hetzner.md';
 export const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/serkanqltun-hub/keizu/main/server/deploy/install.sh | sudo bash';
@@ -92,7 +93,18 @@ function ConnectForm({ link }: { link?: Props['link'] }) {
   };
 
   useEffect(() => {
-    if (link?.server) find(link.server);
+    if (link?.server) {
+      find(link.server);
+      return;
+    }
+    // Opened from a Keizu Server's own address: offer that server, quietly.
+    if (isDesktop || !/^https?:$/.test(location.protocol)) return;
+    discover(globalThis.fetch.bind(globalThis), location.origin)
+      .then((i) => {
+        setAddress((a) => a || i.server);
+        setInfo((cur) => cur ?? i);
+      })
+      .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (e: React.FormEvent) => {

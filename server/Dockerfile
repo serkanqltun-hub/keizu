@@ -1,4 +1,18 @@
-# Keizu Server image: Node.js + built-in SQLite, no native modules.
+# Keizu Server image: the sync server plus the Keizu web app, so the server's
+# address opens the editor itself (and /panel/ the account panel).
+# Build from the repository root:  docker build -f server/Dockerfile .
+
+# 1) The web app (same build as GitHub Pages, served from "/").
+FROM node:22-alpine AS web
+WORKDIR /src
+COPY package.json package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY index.html vite.config.ts tsconfig.json ./
+COPY public ./public
+COPY src ./src
+RUN npx vite build --outDir /web
+
+# 2) The server: Node.js + built-in SQLite, no native modules.
 FROM node:22-alpine
 
 ENV NODE_ENV=production \
@@ -6,10 +20,11 @@ ENV NODE_ENV=production \
     KEIZU_PORT=8787
 
 WORKDIR /app
-COPY package.json package-lock.json ./
+COPY server/package.json server/package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
-COPY src ./src
-COPY public ./public
+COPY server/src ./src
+COPY server/public ./public
+COPY --from=web /web ./web
 
 # `keizu-server <command>` inside the container (docker compose exec keizu keizu-server …)
 RUN printf '#!/bin/sh\nexec node --disable-warning=ExperimentalWarning /app/src/main.ts "$@"\n' > /usr/local/bin/keizu-server \

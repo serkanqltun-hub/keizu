@@ -179,7 +179,7 @@ export function acceptInvite(db: Db, token: string, username: string, password: 
   return user;
 }
 
-export const inviteLink = (base: string, token: string) => `${base.replace(/\/+$/, '')}/#davet=${token}`;
+export const inviteLink = (base: string, token: string) => `${base.replace(/\/+$/, '')}/panel/#davet=${token}`;
 
 // ---------- brute-force protection ----------
 
