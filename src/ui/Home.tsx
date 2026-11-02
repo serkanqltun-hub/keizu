@@ -198,8 +198,8 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
     >
       <aside className="home-side">
         <div className="brand">
-          <div className="logo-mark big"><I.Logo size={20} /></div>
-          <span>Keizu</span>
+          <div className="logo-mark"><I.Logo size={32} /></div>
+          <I.Wordmark size={28} />
         </div>
         <button className="btn primary block" onClick={() => create('mindmap')}>
           <I.Plus size={16} /> {t('home.newMap')}
