@@ -1,9 +1,9 @@
-// Browser storage for maps. localStorage keeps the first version simple;
-// it is swapped for IndexedDB (web) and real files (desktop) later without
-// touching the editor, since both sit behind MapStore.
+// Fallback storage in localStorage, used only when IndexedDB is unavailable
+// (some private browsing modes). It has no version history, and file links
+// last for the session only.
 
 import { normalizeMap, type MindMap } from '../core/model';
-import type { MapStore, MapSummary } from './types';
+import type { FileLink, LibraryStore, MapSummary, VersionInfo } from './types';
 
 const PREFIX = 'keizu:map:';
 
@@ -15,7 +15,9 @@ function safe<T>(fn: () => T, fallback: T): T {
   }
 }
 
-export class LocalMapStore implements MapStore {
+export class LocalMapStore implements LibraryStore {
+  private links = new Map<string, FileLink>();
+
   constructor(private storage: Storage = globalThis.localStorage) {}
 
   async list(): Promise<MapSummary[]> {
@@ -42,5 +44,31 @@ export class LocalMapStore implements MapStore {
 
   async remove(id: string): Promise<void> {
     safe(() => this.storage.removeItem(PREFIX + id), undefined);
+  }
+
+  async listVersions(): Promise<VersionInfo[]> {
+    return [];
+  }
+
+  async getVersion(): Promise<MindMap | undefined> {
+    return undefined;
+  }
+
+  async addVersion(): Promise<boolean> {
+    return false;
+  }
+
+  async getLink(mapId: string) {
+    return this.links.get(mapId);
+  }
+
+  async setLink(mapId: string, link: FileLink | undefined) {
+    if (link) this.links.set(mapId, link);
+    else this.links.delete(mapId);
+  }
+
+  async findByPath(path: string) {
+    for (const [id, l] of this.links) if (l.kind === 'path' && l.path === path) return id;
+    return undefined;
   }
 }

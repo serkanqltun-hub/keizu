@@ -6,7 +6,7 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 
 ## Durum
 
-**Faz 1 / 6: Editör çekirdeği.** Kullanılabilir ama erken bir sürüm. Yol haritası aşağıda.
+**Faz 2 / 6: Dosyalar ve içe/dışa aktarma.** Kullanılabilir ama erken bir sürüm. Yol haritası aşağıda.
 
 ## Özellikler (şu an)
 
@@ -17,8 +17,14 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 - Dal daraltma, geri al / yinele, kopyala / kes / yapıştır
 - 4 tema (Taze, Gece, Kâğıt, Sade), dal stilleri (eğri, dirsek, düz), konu şekli ve rengi
 - İşaretler (öncelik, ilerleme, bayrak, simge) ve konu notları
-- PNG, SVG, Markdown ve `.keizu` olarak dışa aktarma; `.keizu` ve Markdown içe aktarma
-- Haritalar tarayıcıda otomatik kaydedilir
+- Konulara görsel ekleme (PNG, JPEG, GIF, WebP)
+- `.keizu` dosyası: harita JSON'u ve görselleri tek bir pakette; istersen git dostu düz JSON
+- Masaüstünde gerçek dosyalar: Kaydet ile bir dosya seç, değişiklikler o dosyaya otomatik yazılır; `.keizu` dosyasına çift tıklayınca Keizu'da açılır
+- Web'de **Bilgisayara kaydet**: Chrome ve Edge'de dosya bağlı kalır ve otomatik güncellenir, diğer tarayıcılarda indirilir
+- İçe aktarma: `.keizu`, düz JSON, `.xmind` (tüm sayfalar; konular, notlar, işaretler, görseller, serbest konular, ilişkiler), OPML, Markdown. Dosyayı pencereye sürükleyip bırakmak da olur
+- Dışa aktarma: PNG, SVG, PDF, Markdown, OPML, `.keizu`, düz JSON
+- Haritalar bu cihazda (IndexedDB) otomatik kaydedilir; ilk sürümde tarayıcıya kaydedilenler kendiliğinden taşınır
+- Otomatik yerel **sürüm geçmişi**: açarken, kapatırken ve düzenlerken en çok beş dakikada bir anlık görüntü; önizleyip geri yükleyebilirsin (geri yükleme de geri alınabilir)
 
 ## Klavye
 
@@ -32,6 +38,7 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 | Ctrl/⌘ + / | Daralt / genişlet |
 | Ctrl/⌘ + Z, Ctrl/⌘ + Shift + Z | Geri al, yinele |
 | Ctrl/⌘ + C / X / V | Konuyu kopyala, kes, yapıştır |
+| Ctrl/⌘ + S, Ctrl/⌘ + Shift + S | Dosyaya kaydet, farklı kaydet |
 | Ctrl/⌘ + tekerlek, Ctrl/⌘ + 0 | Yakınlaştır, sığdır |
 | Boş alana çift tıkla | Serbest konu |
 | ? | Kısayol listesi |
@@ -54,18 +61,30 @@ npm run tauri build  # masaüstü kurulum dosyaları
 ## Yapı
 
 ```
-src/core/     Veri modeli, yerleşim motoru, geri al, temalar, içe/dışa aktarma (tarayıcıdan bağımsız, testli)
-src/sync/     Depolama ve senkron arayüzleri; şimdilik tarayıcı deposu
+src/core/     Veri modeli, yerleşim motoru, geri al, temalar, dosya formatları (tarayıcıdan bağımsız, testli)
+src/sync/     Depolama ve senkron arayüzleri: IndexedDB kitaplığı, sürüm geçmişi, dosya bağlantıları
 src/ui/       React arayüzü: başlangıç ekranı, editör, tuval, biçim paneli
 src-tauri/    Masaüstü kabuğu (Tauri 2)
 ```
 
-Bir harita bir graftır: birden çok kök konu (ilki ana konu, diğerleri tuvalde serbest) ve konular arası ilişkiler. Şema türü veri değil, görünüm ayarıdır. Dosya formatı okunabilir JSON'dur (`format: "keizu/1"`).
+Bir harita bir graftır: birden çok kök konu (ilki ana konu, diğerleri tuvalde serbest) ve konular arası ilişkiler. Şema türü veri değil, görünüm ayarıdır.
+
+## Dosya formatı
+
+`.keizu` bir zip paketidir; içi okunabilir kalır:
+
+```
+manifest.json          { "format": "keizu/1", "package": 1 }
+map.json               harita (format: "keizu/1"); görseller aşağıdaki dosyaları gösterir
+resources/<id>.<uzantı> konu görselleri
+```
+
+Düz JSON seçeneği aynı haritayı tek bir metin dosyasına yazar (görseller içine gömülür), böylece git'te satır satır fark görülebilir. Keizu her iki biçimi de, ilk sürümün düz JSON `.keizu` dosyalarını da açar. Dosya uzantısı `.json` ise düz JSON, değilse paket yazılır.
 
 ## Yol haritası
 
-1. **Editör çekirdeği** (bu sürüm)
-2. Dosyalar: `.keizu` zip formatı, masaüstünde gerçek dosyalar, `.xmind` / OPML içe aktarma, PDF, sürüm geçmişi
+1. Editör çekirdeği
+2. **Dosyalar** (bu sürüm): `.keizu` zip formatı, masaüstünde gerçek dosyalar, `.xmind` / OPML içe aktarma, PDF, sürüm geçmişi
 3. Hız ve gezinme: ana hat görünümü, Ctrl+K komut paleti, arama, Türkçe + İngilizce arayüz, 10.000 konuda akıcılık
 4. Keizu Server (isteğe bağlı): tek komutla kurulum, QR / kodla bağlanma, senkron
 5. Ortak çalışma ve yeni şemalar: canlı ortak düzenleme, kavram haritası, zaman çizelgesi, balık kılçığı

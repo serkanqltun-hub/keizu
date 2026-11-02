@@ -34,6 +34,10 @@ export interface NodeBox {
   padX: number;
   /** Children hidden by collapsing, 0 when expanded. */
   hidden: number;
+  /** Topic picture drawn above the text, if any. */
+  image?: { href: string; w: number; h: number };
+  /** Vertical space the picture takes at the top of the box (0 without one). */
+  imageH: number;
 }
 
 export interface MapLayout {
@@ -70,7 +74,11 @@ function metricsFor(depth: number, kind: LayoutKind, t: Topic): Metrics {
   };
 }
 
-function sizeNode(t: Topic, depth: number, kind: LayoutKind, measure: Measure) {
+const IMAGE_MAX_W = 320;
+const IMAGE_MAX_H = 240;
+const IMAGE_GAP = 6;
+
+function sizeNode(t: Topic, depth: number, kind: LayoutKind, measure: Measure, resources?: Record<string, string>) {
   const m = metricsFor(depth, kind, t);
   const font = `${t.style?.italic ? 'italic ' : ''}${m.weight} ${m.fontSize}px ${FONT_FAMILY}`;
   const lines = (t.text || ' ').split('\n');
@@ -78,9 +86,16 @@ function sizeNode(t: Topic, depth: number, kind: LayoutKind, measure: Measure) {
   const lineHeight = Math.round(m.fontSize * 1.35);
   const icons = (t.markers?.length ?? 0) + (t.note ? 1 : 0);
   const iconW = icons * (MARKER_SIZE + MARKER_GAP);
-  const w = Math.max(m.minW, Math.ceil(textW + iconW + m.padX * 2));
-  const h = Math.max(lines.length * lineHeight, icons ? MARKER_SIZE : 0) + m.padY * 2;
-  return { w, h, lines, font, fontSize: m.fontSize, lineHeight, padX: m.padX, shape: m.shape };
+  const href = t.image && resources?.[t.image.res];
+  let image: NodeBox['image'];
+  if (href && t.image) {
+    const k = Math.min(1, IMAGE_MAX_W / t.image.width, IMAGE_MAX_H / t.image.height);
+    image = { href, w: Math.round(t.image.width * k), h: Math.round(t.image.height * k) };
+  }
+  const imageH = image ? image.h + IMAGE_GAP : 0;
+  const w = Math.max(m.minW, Math.ceil(textW + iconW + m.padX * 2), image ? image.w + m.padX * 2 : 0);
+  const h = Math.max(lines.length * lineHeight, icons ? MARKER_SIZE : 0) + m.padY * 2 + imageH;
+  return { w, h, lines, font, fontSize: m.fontSize, lineHeight, padX: m.padX, shape: m.shape, image, imageH };
 }
 
 const H_GAP = (depth: number) => (depth === 0 ? 64 : 40);
@@ -102,7 +117,7 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
     // central topic stays visually unique.
     const baseDepth = ri === 0 ? 0 : 1;
     const rootColor = ri === 0 ? theme.mono : palette(colorIndex++);
-    const tree = layoutTree(root, kind, baseDepth, rootColor, palette, theme.mono, measure);
+    const tree = layoutTree(root, kind, baseDepth, rootColor, palette, theme.mono, measure, map.resources);
     let pos = root.pos;
     if (!pos && ri > 0) {
       // No stored position: park it under everything laid out so far.
@@ -140,12 +155,13 @@ function layoutTree(
   palette: (i: number) => string,
   mono: string,
   measure: Measure,
+  resources?: Record<string, string>,
 ): { nodes: NodeBox[]; root: NodeBox; minY: number } {
   const nodes: NodeBox[] = [];
   const byId = new Map<string, NodeBox>();
 
   const build = (t: Topic, depth: number, color: string, parentId?: string) => {
-    const size = sizeNode(t, depth, kind, measure);
+    const size = sizeNode(t, depth, kind, measure, resources);
     const hidden = t.collapsed && t.children.length ? countTopics(t) - 1 : 0;
     const box: NodeBox = { id: t.id, rootId: root.id, layout: kind, topic: t, parentId, depth, side: 0, x: 0, y: 0, color, hidden, ...size };
     nodes.push(box);

@@ -24,9 +24,17 @@ export interface Point {
   y: number;
 }
 
+/** A picture shown above a topic's text. `res` keys into MindMap.resources. */
+export interface TopicImage {
+  res: string;
+  width: number;
+  height: number;
+}
+
 export interface Topic {
   id: string;
   text: string;
+  image?: TopicImage;
   /** Canvas position of a root topic's centre. Ignored on non-roots. */
   pos?: Point;
   /** Per-tree layout override for a root topic. */
@@ -58,6 +66,11 @@ export interface MindMap {
   /** roots[0] is the main topic; any others float on the canvas. */
   roots: Topic[];
   relations: Relation[];
+  /**
+   * Embedded files (topic images), as data URLs keyed by resource id. In a
+   * .keizu package they are stored as separate files under resources/.
+   */
+  resources?: Record<string, string>;
 }
 
 let counter = 0;
@@ -295,6 +308,38 @@ export function toggleCollapse(map: MindMap, id: string): MindMap {
 
 export function setMapProps(map: MindMap, patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'title'>>): MindMap {
   return { ...map, ...patch, updatedAt: new Date().toISOString() };
+}
+
+// ---------- images ----------
+
+/** Attaches an image (a data URL) to a topic, replacing any previous one. */
+export function setTopicImage(map: MindMap, id: string, dataUrl: string, width: number, height: number): MindMap {
+  const res = newId('img');
+  const withRes = { ...map, resources: { ...map.resources, [res]: dataUrl } };
+  return mapTopic(withRes, id, (t) => ({ ...t, image: { res, width, height } }));
+}
+
+export function removeTopicImage(map: MindMap, id: string): MindMap {
+  return mapTopic(map, id, (t) => ({ ...t, image: undefined }));
+}
+
+/**
+ * Drops resources no topic points at any more. Done when writing a map out,
+ * not on every edit, so undo and cut/paste keep their images.
+ */
+export function pruneResources(map: MindMap): MindMap {
+  if (!map.resources) return map;
+  const used = new Set<string>();
+  const walk = (t: Topic) => {
+    if (t.image) used.add(t.image.res);
+    t.children.forEach(walk);
+  };
+  map.roots.forEach(walk);
+  const keys = Object.keys(map.resources);
+  if (keys.every((k) => used.has(k))) return map;
+  const resources: Record<string, string> = {};
+  for (const k of keys) if (used.has(k)) resources[k] = map.resources[k];
+  return { ...map, resources: Object.keys(resources).length ? resources : undefined };
 }
 
 // ---------- relations ----------

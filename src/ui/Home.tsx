@@ -1,12 +1,16 @@
-import { useEffect, useRef, useState } from 'react';
-import { fromJSON, fromMarkdown } from '../core/io';
+import { useEffect, useState } from 'react';
 import { createMap, type LayoutKind, type MindMap } from '../core/model';
 import type { MapStore, MapSummary } from '../sync/types';
 import * as I from './Icons';
+import { fromFileList, isDesktop, pickFiles, type PickedFile } from './platform';
 
 interface Props {
   store: MapStore;
   onOpen(map: MindMap): void;
+  /** Imports files; resolves with an error message, if any. */
+  onOpenFiles(files: PickedFile[]): Promise<string | null>;
+  notice: string | null;
+  onNoticeShown(): void;
 }
 
 const TEMPLATES: { layout: LayoutKind; name: string; svg: JSX.Element }[] = [
@@ -56,11 +60,17 @@ function when(iso: string): string {
   return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
 }
 
-export function Home({ store, onOpen }: Props) {
+export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Props) {
   const [maps, setMaps] = useState<MapSummary[] | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
+
+  useEffect(() => {
+    if (!notice) return;
+    setError(notice);
+    onNoticeShown();
+  }, [notice, onNoticeShown]);
 
   const refresh = () => store.list().then(setMaps);
   useEffect(() => {
@@ -84,13 +94,20 @@ export function Home({ store, onOpen }: Props) {
     refresh();
   };
 
-  const importFile = async (file: File) => {
+  const importFiles = async (files: PickedFile[]) => {
     setError(null);
     try {
-      const text = await file.text();
-      const map = /\.(md|markdown|txt)$/i.test(file.name) ? fromMarkdown(text, file.name.replace(/\.[^.]+$/, '')) : fromJSON(text);
-      await store.save(map);
-      onOpen(map);
+      const err = await onOpenFiles(files);
+      if (err) setError(err);
+    } catch (e) {
+      setError((e as Error).message || 'Dosya açılamadı.');
+    }
+    refresh();
+  };
+
+  const openDialog = async () => {
+    try {
+      await importFiles(await pickFiles());
     } catch (e) {
       setError((e as Error).message || 'Dosya açılamadı.');
     }
@@ -99,7 +116,22 @@ export function Home({ store, onOpen }: Props) {
   const shown = (maps ?? []).filter((m) => m.title.toLocaleLowerCase('tr').includes(query.toLocaleLowerCase('tr')));
 
   return (
-    <div className="home">
+    <div
+      className={`home ${dragging ? 'dropping' : ''}`}
+      onDragOver={(e) => {
+        if (![...e.dataTransfer.types].includes('Files')) return;
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target) setDragging(false);
+      }}
+      onDrop={async (e) => {
+        e.preventDefault();
+        setDragging(false);
+        importFiles(await fromFileList(e.dataTransfer.files));
+      }}
+    >
       <aside className="home-side">
         <div className="brand">
           <div className="logo-mark big"><I.Logo size={20} /></div>
@@ -108,23 +140,18 @@ export function Home({ store, onOpen }: Props) {
         <button className="btn primary block" onClick={() => create('mindmap')}>
           <I.Plus size={16} /> Yeni harita
         </button>
-        <button className="btn block" onClick={() => fileInput.current?.click()}>
+        <button className="btn block" onClick={openDialog} title=".keizu, .json, .xmind, .opml veya Markdown">
           <I.Import size={16} /> Dosya aç
         </button>
-        <input
-          ref={fileInput}
-          type="file"
-          accept=".keizu,.json,.md,.markdown,.txt"
-          hidden
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) importFile(f);
-            e.target.value = '';
-          }}
-        />
+        <p className="side-hint">.keizu, .xmind, OPML ve Markdown açılır. Dosyayı pencereye sürükleyip bırakabilirsin.</p>
         <div className="local-card">
           <strong>Bu cihazda</strong>
-          <span>Haritaların yalnız bu cihazda saklanır, hesap veya sunucu gerekmez.</span>
+          <span>
+            {isDesktop
+              ? 'Haritaların bu bilgisayarda saklanır. Bir haritayı "Kaydet" ile dosya olarak tuttuğunda değişiklikler o dosyaya da yazılır.'
+              : 'Haritaların bu tarayıcıda saklanır, hesap veya sunucu gerekmez. Yedek ya da başka cihaz için "Bilgisayara kaydet" ile dosya olarak al.'}
+          </span>
+          <span className="muted">Her haritanın son sürümleri otomatik olarak saklanır (sürüm geçmişi).</span>
           <span className="muted">Senkron ve ortak çalışma için kendi sunucunu bağlama seçeneği yakında.</span>
         </div>
       </aside>
@@ -167,7 +194,10 @@ export function Home({ store, onOpen }: Props) {
                       </svg>
                     </span>
                     <span className="card-title">{m.title}</span>
-                    <span className="card-meta">{when(m.updatedAt)}</span>
+                    <span className="card-meta">
+                      {when(m.updatedAt)}
+                      {m.fileName && <span className="card-file" title="Bu dosyaya da kaydediliyor"> · {m.fileName}</span>}
+                    </span>
                   </button>
                   <button className="ib card-del" aria-label={`${m.title} haritasını sil`} title="Sil" onClick={() => remove(m)}>
                     <I.Trash size={16} />
@@ -178,6 +208,7 @@ export function Home({ store, onOpen }: Props) {
           )}
         </section>
       </main>
+      {dragging && <div className="drop-hint" aria-hidden="true">Açmak için bırak</div>}
     </div>
   );
 }

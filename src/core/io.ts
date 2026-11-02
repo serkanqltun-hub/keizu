@@ -1,13 +1,19 @@
 // Import / export of formats that don't need a browser.
 
 import { createTopic, isMindMap, newId, normalizeMap, type MindMap, type Topic } from './model';
+import { child, childrenNamed, escapeXml, parseXml, type XmlNode } from './xml';
 
 export function toJSON(map: MindMap): string {
   return JSON.stringify(map, null, 2);
 }
 
 export function fromJSON(text: string): MindMap {
-  const data = JSON.parse(text);
+  let data: unknown;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    throw new Error('Dosya okunamadı: geçerli bir Keizu haritası değil.');
+  }
   if (!isMindMap(data)) throw new Error('Bu dosya bir Keizu haritası değil.');
   return normalizeMap(data);
 }
@@ -28,6 +34,69 @@ export function toMarkdown(map: MindMap): string {
     r.children.forEach((c) => walk(c, 0));
   }
   return out.join('\n') + '\n';
+}
+
+/** OPML outline: the main topic and any floating topics as top-level outlines. Notes go in `_note`. */
+export function toOPML(map: MindMap): string {
+  const out: string[] = [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<opml version="2.0">',
+    '  <head>',
+    `    <title>${escapeXml(map.title)}</title>`,
+    `    <dateModified>${new Date(map.updatedAt).toUTCString()}</dateModified>`,
+    '  </head>',
+    '  <body>',
+  ];
+  const walk = (t: Topic, depth: number) => {
+    const pad = '  '.repeat(depth);
+    const note = t.note ? ` _note="${escapeXml(t.note)}"` : '';
+    const open = `${pad}<outline text="${escapeXml(t.text)}"${note}`;
+    if (!t.children.length) return void out.push(`${open}/>`);
+    out.push(`${open}>`);
+    t.children.forEach((c) => walk(c, depth + 1));
+    out.push(`${pad}</outline>`);
+  };
+  map.roots.forEach((r) => walk(r, 2));
+  out.push('  </body>', '</opml>');
+  return out.join('\n') + '\n';
+}
+
+/** Reads an OPML outline. One top-level outline becomes the main topic; several hang under the title. */
+export function fromOPML(text: string, fallbackTitle = 'İçe aktarılan'): MindMap {
+  let doc: XmlNode;
+  try {
+    doc = parseXml(text);
+  } catch {
+    throw new Error('OPML dosyası okunamadı.');
+  }
+  if (doc.name !== 'opml') throw new Error('Bu dosya bir OPML belgesi değil.');
+  const body = child(doc, 'body');
+  const title = child(child(doc, 'head') ?? doc, 'title')?.text.trim() || fallbackTitle;
+  const convert = (o: XmlNode): Topic => {
+    const t = createTopic((o.attrs.text ?? o.attrs.title ?? '').trim() || 'Konu', childrenNamed(o, 'outline').map(convert));
+    const note = o.attrs._note?.trim();
+    if (note) t.note = note;
+    return t;
+  };
+  const tops = body ? childrenNamed(body, 'outline').map(convert) : [];
+  const main = tops.length === 1 ? tops[0] : createTopic(title, tops);
+  return emptyMap(main);
+}
+
+export function emptyMap(main: Topic, roots: Topic[] = [main]): MindMap {
+  return {
+    format: 'keizu/1',
+    id: newId('m'),
+    title: main.text,
+    version: 0,
+    updatedAt: new Date().toISOString(),
+    theme: 'fresh',
+    layout: 'mindmap',
+    branchStyle: 'curve',
+    multicolor: true,
+    roots,
+    relations: [],
+  };
 }
 
 /** Parses a heading plus nested "-" / "*" / "1." list back into a map. */
@@ -60,17 +129,5 @@ export function fromMarkdown(text: string, fallbackTitle = 'İçe aktarılan'): 
     stack[stack.length - 1].topic.children.push(topic);
     stack.push({ indent, topic });
   }
-  return {
-    format: 'keizu/1',
-    id: newId('m'),
-    title: main.text,
-    version: 0,
-    updatedAt: new Date().toISOString(),
-    theme: 'fresh',
-    layout: 'mindmap',
-    branchStyle: 'curve',
-    multicolor: true,
-    roots,
-    relations: [],
-  };
+  return emptyMap(main, roots);
 }

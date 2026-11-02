@@ -324,10 +324,13 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
   const lines = value.split('\n');
   const textW = Math.max(...lines.map((l) => canvasMeasure(l || ' ', box.font)));
   const w = Math.max(box.w, textW + box.padX * 2 + 8) * view.k;
-  const h = Math.max(box.h, lines.length * box.lineHeight + (box.h - box.lineHeight * box.lines.length)) * view.k;
+  // The edit box covers the text area only, below any picture.
+  const bodyH = box.h - box.imageH;
+  const padY = (bodyH - box.lineHeight * box.lines.length) / 2;
+  const h = Math.max(bodyH, lines.length * box.lineHeight + padY * 2) * view.k;
   const { fill, text } = nodeColors(box, theme);
   const left = view.x + (box.x - box.w / 2) * view.k;
-  const top = view.y + (box.y - box.h / 2) * view.k;
+  const top = view.y + (box.y - box.h / 2 + box.imageH) * view.k;
 
   const finish = (commit: boolean) => {
     if (done.current) return;
@@ -366,7 +369,7 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
         font: box.font,
         fontSize: box.fontSize * view.k,
         lineHeight: `${box.lineHeight * view.k}px`,
-        padding: `${((box.h - box.lineHeight * box.lines.length) / 2) * view.k}px ${box.padX * view.k}px`,
+        padding: `${padY * view.k}px ${box.padX * view.k}px`,
         color: text,
         background: fill === 'transparent' ? theme.canvas : fill,
         borderRadius: 8 * view.k,
