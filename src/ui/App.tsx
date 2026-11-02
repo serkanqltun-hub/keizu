@@ -8,10 +8,17 @@ import { Home } from './Home';
 import { importIntoLibrary } from './library';
 import { clearMeasureCache } from './measure';
 import { onOpenFiles, readPath, takeOpenedFiles, type PickedFile } from './platform';
+import { getLang, t, useLang } from '../i18n';
 
 export function App() {
   const [store, setStore] = useState<LibraryStore | null>(null);
-  const [open, setOpen] = useState<MindMap | null>(null);
+  const [open, setOpenState] = useState<{ map: MindMap; focusId?: string } | null>(null);
+  const setOpen = useCallback((map: MindMap | null, focusId?: string) => setOpenState(map ? { map, focusId } : null), []);
+  // Re-render everything when the interface language changes.
+  useLang();
+  useEffect(() => {
+    document.documentElement.lang = getLang();
+  }, []);
   const [notice, setNotice] = useState<string | null>(null);
   // Bumped once web fonts load, so the layout re-measures text.
   const [fontsReady, setFontsReady] = useState(0);
@@ -33,7 +40,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    document.title = open ? `${open.title} · Keizu` : 'Keizu';
+    document.title = open ? `${open.map.title} · Keizu` : 'Keizu';
   }, [open]);
 
   /** Imports files and opens the first map. Returns an error message, if any. */
@@ -45,10 +52,10 @@ export function App() {
         setOpen(null); // remount the editor even when the same map is reopened
         setTimeout(() => setOpen(maps[0]), 0);
       }
-      if (maps.length > 1) setNotice(`${maps.length} harita içe aktarıldı.`);
+      if (maps.length > 1) setNotice(t('home.imported', { n: maps.length }));
       return errors.length ? errors.join('\n') : null;
     },
-    [store],
+    [store, setOpen],
   );
 
   // Desktop: files double-clicked in the file manager.
@@ -60,7 +67,7 @@ export function App() {
       const results = await Promise.allSettled(paths.map(readPath));
       const files = results.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []));
       const err = await openFiles(files);
-      if (err || files.length < paths.length) setNotice(err ?? 'Bazı dosyalar okunamadı.');
+      if (err || files.length < paths.length) setNotice(err ?? t('home.someUnreadable'));
     };
     openPaths();
     let off = () => {};
@@ -70,7 +77,7 @@ export function App() {
 
   if (!store) return null;
   return open ? (
-    <Editor key={open.id} initial={open} store={store} fontsReady={fontsReady} onBack={() => setOpen(null)} />
+    <Editor key={open.map.id} initial={open.map} focusId={open.focusId} store={store} fontsReady={fontsReady} onBack={() => setOpen(null)} />
   ) : (
     <Home store={store} onOpen={setOpen} onOpenFiles={openFiles} notice={notice} onNoticeShown={() => setNotice(null)} />
   );

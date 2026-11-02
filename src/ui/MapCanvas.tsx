@@ -1,10 +1,12 @@
 // The interactive canvas: pan, zoom, select, drag topics onto new parents,
 // and edit topic text in place.
 
-import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { MapLayout, NodeBox } from '../core/layout';
 import { findTopic, isRoot, type MindMap, type Point, type Topic } from '../core/model';
 import type { Theme } from '../core/themes';
+import { snappedViewport } from '../core/viewport';
+import { t } from '../i18n';
 import { MapSvg, SELECT_COLOR, TopicView, nodeColors } from './MapSvg';
 import { canvasMeasure } from './measure';
 
@@ -12,13 +14,24 @@ export interface CanvasHandle {
   zoomBy(factor: number): void;
   fit(): void;
   centerRoot(): void;
+  /** Pans (and zooms in if far out) so a topic sits in the middle. */
+  centerOn(id: string): void;
 }
+
+/** Re-renders only when the map, selection or snapped viewport changes, not on every pan step. */
+const MemoMapSvg = memo(MapSvg);
+
+/** Big maps zoomed out this far are drawn as plain shapes. */
+const SIMPLE_MIN_TOPICS = 1500;
+const SIMPLE_BELOW_K = 0.35;
 
 interface Props {
   map: MindMap;
   layout: MapLayout;
   theme: Theme;
   selectedId: string | null;
+  /** Topic to bring into view when the map opens instead of fitting it all. */
+  focusId?: string;
   editingId: string | null;
   editSeed: string | null;
   selectedRelId: string | null;
@@ -43,7 +56,7 @@ interface View {
   k: number;
 }
 
-const MIN_K = 0.2;
+const MIN_K = 0.05;
 const MAX_K = 3;
 const clampK = (k: number) => Math.min(MAX_K, Math.max(MIN_K, k));
 
@@ -59,6 +72,17 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   const [view, setView] = useState<View>({ x: 0, y: 0, k: 1 });
   const viewRef = useRef(view);
   viewRef.current = view;
+  const [size, setSize] = useState({ w: 0, h: 0 });
+
+  useLayoutEffect(() => {
+    const el = wrap.current;
+    if (!el) return;
+    const update = () => setSize({ w: el.clientWidth, h: el.clientHeight });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    update();
+    return () => ro.disconnect();
+  }, []);
 
   const [drag, setDrag] = useState<{ id: string; x: number; y: number; target: string | null } | null>(null);
   const [pointer, setPointer] = useState<Point | null>(null);
@@ -98,11 +122,26 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     setView((v) => ({ ...v, x: rect.width / 2, y: rect.height / 2 }));
   }, []);
 
-  useImperativeHandle(ref, () => ({ zoomBy: (f) => setZoom(viewRef.current.k * f), fit, centerRoot }), [setZoom, fit, centerRoot]);
+  const centerOn = useCallback(
+    (id: string) => {
+      const rect = wrap.current?.getBoundingClientRect();
+      const b = layout.byId.get(id);
+      if (!rect || !b) return;
+      const k = Math.max(viewRef.current.k, 0.8);
+      setView({ k, x: rect.width / 2 - b.x * k, y: rect.height / 2 - b.y * k });
+    },
+    [layout],
+  );
 
-  // Fit the map when it is opened and when its layout kind changes.
+  useImperativeHandle(ref, () => ({ zoomBy: (f) => setZoom(viewRef.current.k * f), fit, centerRoot, centerOn }), [setZoom, fit, centerRoot, centerOn]);
+
+  // Fit the map when it is opened and when its layout kind changes; when
+  // opened from a search, show the found topic instead.
+  const opened = useRef(false);
   useLayoutEffect(() => {
-    fit();
+    if (!opened.current && props.focusId && props.focusId !== map.roots[0].id) centerOn(props.focusId);
+    else fit();
+    opened.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map.id, map.layout]);
 
@@ -114,15 +153,17 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     const b = layout.byId.get(selectedId);
     const rect = wrap.current?.getBoundingClientRect();
     if (!b || !rect) return;
-    const v = viewRef.current;
-    const sx = b.x * v.k + v.x, sy = b.y * v.k + v.y;
-    const mx = (b.w / 2) * v.k + 40, my = (b.h / 2) * v.k + 40;
-    let dx = 0, dy = 0;
-    if (sx - mx < 0) dx = mx - sx;
-    else if (sx + mx > rect.width) dx = rect.width - sx - mx;
-    if (sy - my < 0) dy = my - sy;
-    else if (sy + my > rect.height) dy = rect.height - sy - my;
-    if (dx || dy) setView({ ...v, x: v.x + dx, y: v.y + dy });
+    // Updater form: works on the latest view, even one set by fit() a moment ago.
+    setView((v) => {
+      const sx = b.x * v.k + v.x, sy = b.y * v.k + v.y;
+      const mx = (b.w / 2) * v.k + 40, my = (b.h / 2) * v.k + 40;
+      let dx = 0, dy = 0;
+      if (sx - mx < 0) dx = mx - sx;
+      else if (sx + mx > rect.width) dx = rect.width - sx - mx;
+      if (sy - my < 0) dy = my - sy;
+      else if (sy + my > rect.height) dy = rect.height - sy - my;
+      return dx || dy ? { ...v, x: v.x + dx, y: v.y + dy } : v;
+    });
   }, [selectedId, layout]);
 
   // Wheel: pan, or zoom with Ctrl/⌘ (also what trackpad pinch sends).
@@ -152,10 +193,21 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     if (!drag) return null;
     const t = findTopic(map, drag.id);
     return t ? subtreeIds(t) : null;
-  }, [drag, map]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag?.id, map]);
 
-  const hitTest = (x: number, y: number, exclude: Set<string> | null): NodeBox | undefined =>
-    [...layout.nodes].reverse().find((b) => !exclude?.has(b.id) && Math.abs(x - b.x) <= b.w / 2 + 6 && Math.abs(y - b.y) <= b.h / 2 + 6);
+  const hitTest = (x: number, y: number, exclude: Set<string> | null): NodeBox | undefined => {
+    for (let i = layout.nodes.length - 1; i >= 0; i--) {
+      const b = layout.nodes[i];
+      if (!exclude?.has(b.id) && Math.abs(x - b.x) <= b.w / 2 + 6 && Math.abs(y - b.y) <= b.h / 2 + 6) return b;
+    }
+  };
+
+  const simple = layout.nodes.length >= SIMPLE_MIN_TOPICS && view.k < SIMPLE_BELOW_K;
+  const vp = size.w ? snappedViewport(view, size.w, size.h) : undefined;
+  const vpKey = vp ? `${vp.minX},${vp.minY},${vp.maxX},${vp.maxY}` : '';
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const viewport = useMemo(() => vp, [vpKey]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.button !== 1) return;
@@ -165,9 +217,11 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       props.onToggleCollapse(collapse.getAttribute('data-collapse-id')!);
       return;
     }
-    const topic = el.closest('[data-topic-id]');
+    // Simplified drawing has no per-topic elements: find the topic by position.
+    const pt = toMap(e.clientX, e.clientY);
+    const topicId = el.closest('[data-topic-id]')?.getAttribute('data-topic-id') ?? (simple ? hitTest(pt.x, pt.y, null)?.id : undefined);
     if (props.relationFrom) {
-      if (topic) props.onPickRelationTarget(topic.getAttribute('data-topic-id')!);
+      if (topicId) props.onPickRelationTarget(topicId);
       return;
     }
     const relation = el.closest('[data-relation-id]');
@@ -176,8 +230,8 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       return;
     }
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
-    if (topic && e.button === 0) {
-      const id = topic.getAttribute('data-topic-id')!;
+    if (topicId && e.button === 0) {
+      const id = topicId;
       if (id !== editingId) props.onSelect(id);
       // Remember where inside the box it was grabbed, so a moved root
       // doesn't jump to the pointer.
@@ -224,8 +278,9 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
-    const topic = (e.target as Element).closest('[data-topic-id]');
-    if (topic) props.onStartEdit(topic.getAttribute('data-topic-id')!);
+    const p = toMap(e.clientX, e.clientY);
+    const topicId = (e.target as Element).closest('[data-topic-id]')?.getAttribute('data-topic-id') ?? (simple ? hitTest(p.x, p.y, null)?.id : undefined);
+    if (topicId) props.onStartEdit(topicId);
     else if (!(e.target as Element).closest('[data-relation-id]')) props.onCreateFloating(toMap(e.clientX, e.clientY));
   };
 
@@ -239,7 +294,8 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       className="canvas"
       style={{
         backgroundColor: theme.canvas,
-        backgroundImage: `radial-gradient(${theme.grid} 1px, transparent 1px)`,
+        // The dot grid turns into a grey wash when zoomed far out.
+        backgroundImage: view.k < 0.3 ? 'none' : `radial-gradient(${theme.grid} 1px, transparent 1px)`,
         backgroundSize: `${20 * view.k}px ${20 * view.k}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
         cursor: props.relationFrom ? 'crosshair' : gesture.current?.kind === 'pan' ? 'grabbing' : 'default',
@@ -253,17 +309,20 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
         onPointerCancel={onPointerUp}
         onDoubleClick={onDoubleClick}
         role="application"
-        aria-label={`Zihin haritası: ${map.title}`}
+        aria-label={t('canvas.label', { title: map.title })}
       >
         <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
-          <MapSvg
+          {/* Nothing is drawn until the canvas size (and so the viewport) is known. */}
+          {viewport && <MemoMapSvg
             map={map}
             layout={layout}
             theme={theme}
             selectedId={editingId ? undefined : selectedId ?? undefined}
             selectedRelId={props.selectedRelId ?? undefined}
             dimIds={dragged ?? undefined}
-          />
+            viewport={viewport}
+            simple={simple}
+          />}
           {props.relationFrom && pointer && layout.byId.get(props.relationFrom) && (
             <line
               x1={layout.byId.get(props.relationFrom)!.x}
@@ -343,7 +402,7 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
     <textarea
       ref={ta}
       className="edit-box"
-      aria-label="Konu metni"
+      aria-label={t('edit.topicText')}
       value={value}
       spellCheck={false}
       onChange={(e) => setValue(e.target.value)}

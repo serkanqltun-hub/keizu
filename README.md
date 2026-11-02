@@ -6,7 +6,7 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 
 ## Durum
 
-**Faz 2 / 6: Dosyalar ve içe/dışa aktarma.** Kullanılabilir ama erken bir sürüm. Yol haritası aşağıda.
+**Faz 3 / 6: Hız ve gezinme.** Kullanılabilir ama erken bir sürüm. Yol haritası aşağıda.
 
 ## Özellikler (şu an)
 
@@ -25,12 +25,24 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 - Dışa aktarma: PNG, SVG, PDF, Markdown, OPML, `.keizu`, düz JSON
 - Haritalar bu cihazda (IndexedDB) otomatik kaydedilir; ilk sürümde tarayıcıya kaydedilenler kendiliğinden taşınır
 - Otomatik yerel **sürüm geçmişi**: açarken, kapatırken ve düzenlerken en çok beş dakikada bir anlık görüntü; önizleyip geri yükleyebilirsin (geri yükleme de geri alınabilir)
+- **Dal başına yerleşim**: herhangi bir dalı haritanın geri kalanından farklı bir şemayla (zihin, mantık, org) dizebilirsin (Biçim paneli → Dal yerleşimi)
+- **Ana hat görünümü**: aynı harita girintili liste olarak; Tab içeri al, Shift+Tab dışarı al, Alt+↑/↓ sırala
+- **Komut paleti** (Ctrl/⌘ + K): her komutu ve haritadaki her konuyu yazarak bul; Türkçe karakterlere duyarsız arama ("sik" → "Şık")
+- **Tüm haritalarda arama**: başlangıç ekranındaki arama, bütün haritaların konularında ve notlarında arar; sonuca tıklayınca harita o konuda açılır
+- **Değiştirilebilir kısayollar**: Klavye kısayolları penceresinden her komuta istediğin tuşu ata
+- **Türkçe ve İngilizce arayüz** (başlangıç ekranından veya komut paletinden değişir); yeni dil eklemek tek dosya
+- **Büyük haritalar**: yalnız ekranda görünen konular çizilir, çok uzaktan bakınca sade çizime geçilir; 10.000+ konuluk harita akıcı kalır (performans testi: `src/ui/perf.test.tsx`)
 
 ## Klavye
 
 | Tuş | İşlev |
 | --- | --- |
-| Tab | Alt konu ekle |
+| Ctrl/⌘ + K | Komut paleti: komut veya konu ara |
+| Tab | Alt konu ekle (ana hatta: içeri al) |
+| Shift+Tab | Ana hatta: dışarı al |
+| Alt + ↑ / ↓ | Konuyu kardeşleri arasında yukarı / aşağı taşı |
+| Ctrl/⌘ + Alt + O | Harita / ana hat görünümü |
+| Ctrl/⌘ + Enter | Seçili konuyu ortala |
 | Enter / Shift+Enter | Kardeş konu ekle (sonrasına / öncesine) |
 | F2, Boşluk veya yazmaya başla | Metni düzenle (Shift+Enter yeni satır) |
 | Delete | Konuyu veya seçili ilişkiyi sil |
@@ -41,7 +53,9 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 | Ctrl/⌘ + S, Ctrl/⌘ + Shift + S | Dosyaya kaydet, farklı kaydet |
 | Ctrl/⌘ + tekerlek, Ctrl/⌘ + 0 | Yakınlaştır, sığdır |
 | Boş alana çift tıkla | Serbest konu |
-| ? | Kısayol listesi |
+| ? | Kısayollar (buradan değiştirilebilir) |
+
+Bunlar varsayılanlardır; değiştirdiğin kısayollar bu cihazda saklanır.
 
 ## Geliştirme
 
@@ -63,7 +77,8 @@ npm run tauri build  # masaüstü kurulum dosyaları
 ```
 src/core/     Veri modeli, yerleşim motoru, geri al, temalar, dosya formatları (tarayıcıdan bağımsız, testli)
 src/sync/     Depolama ve senkron arayüzleri: IndexedDB kitaplığı, sürüm geçmişi, dosya bağlantıları
-src/ui/       React arayüzü: başlangıç ekranı, editör, tuval, biçim paneli
+src/ui/       React arayüzü: başlangıç ekranı, editör, tuval, ana hat, komut paleti, biçim paneli
+src/i18n/     Arayüz dilleri (tr.ts kaynak dil, en.ts; eksik çeviri derlemede hata verir)
 src-tauri/    Masaüstü kabuğu (Tauri 2)
 ```
 
@@ -84,8 +99,8 @@ Düz JSON seçeneği aynı haritayı tek bir metin dosyasına yazar (görseller 
 ## Yol haritası
 
 1. Editör çekirdeği
-2. **Dosyalar** (bu sürüm): `.keizu` zip formatı, masaüstünde gerçek dosyalar, `.xmind` / OPML içe aktarma, PDF, sürüm geçmişi
-3. Hız ve gezinme: ana hat görünümü, Ctrl+K komut paleti, arama, Türkçe + İngilizce arayüz, 10.000 konuda akıcılık
+2. Dosyalar: `.keizu` zip formatı, masaüstünde gerçek dosyalar, `.xmind` / OPML içe aktarma, PDF, sürüm geçmişi
+3. **Hız ve gezinme** (bu sürüm): ana hat görünümü, Ctrl+K komut paleti, tüm haritalarda arama, değiştirilebilir kısayollar, Türkçe + İngilizce arayüz, 10.000 konuda akıcılık, dal başına yerleşim
 4. Keizu Server (isteğe bağlı): tek komutla kurulum, QR / kodla bağlanma, senkron
 5. Ortak çalışma ve yeni şemalar: canlı ortak düzenleme, kavram haritası, zaman çizelgesi, balık kılçığı
 6. Genişleme: eklentiler, mobil

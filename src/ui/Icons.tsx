@@ -59,3 +59,7 @@ export const FloatingIcon = (p: P) => <Svg {...p}><rect x="3" y="4" width="9" he
 export const Save = (p: P) => <Svg {...p}><path d="M5 4h11l3 3v13H5z" /><path d="M8 4v5h7V4M8 20v-6h8v6" /></Svg>;
 export const ImageIcon = (p: P) => <Svg {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="M4 18l5-5 4 4 3-3 4 4" /></Svg>;
 export const History = (p: P) => <Svg {...p}><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" /><path d="M4 4v4.5h4.5M12 8v4.5l3 2" /></Svg>;
+export const Chevron = (p: P) => <Svg {...p}><path d="M9 6l6 6-6 6" /></Svg>;
+export const OutlineIcon = (p: P) => <Svg {...p}><path d="M4 6h.01M8 6h12M8 12h.01M12 12h8M8 18h.01M12 18h8" /></Svg>;
+export const MapIcon = (p: P) => <Svg {...p}><rect x="9" y="10" width="6" height="4" rx="1.5" /><path d="M15 12c2 0 2-5 5-5M15 12c2 0 2 5 5 5M9 12c-2 0-2-5-5-5M9 12c-2 0-2 5-5 5" /></Svg>;
+export const Command = (p: P) => <Svg {...p}><path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z" /></Svg>;

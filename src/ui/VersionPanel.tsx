@@ -3,6 +3,7 @@ import { layoutMap } from '../core/layout';
 import type { MindMap } from '../core/model';
 import { getTheme } from '../core/themes';
 import type { VersionInfo, VersionStore } from '../sync/types';
+import { locale, t, type MessageKey } from '../i18n';
 import * as I from './Icons';
 import { MapSvg } from './MapSvg';
 import { canvasMeasure } from './measure';
@@ -15,18 +16,13 @@ interface Props {
   onRestore(map: MindMap): void;
 }
 
-const REASON: Record<VersionInfo['reason'], string> = {
-  open: 'Açılırken',
-  close: 'Kapatılırken',
-  auto: 'Otomatik',
-  restore: 'Geri yüklemeden önce',
-};
+const reasonLabel = (r: VersionInfo['reason']) => t(`versions.reason.${r}` as MessageKey);
 
 function stamp(iso: string): string {
   const d = new Date(iso);
   const today = new Date().toDateString() === d.toDateString();
-  const time = d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' });
-  return today ? `Bugün ${time}` : `${d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'short', year: 'numeric' })} ${time}`;
+  const time = d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' });
+  return today ? t('versions.today', { time }) : `${d.toLocaleDateString(locale(), { day: 'numeric', month: 'short', year: 'numeric' })} ${time}`;
 }
 
 export function VersionPanel({ store, map, fontsReady, onClose, onRestore }: Props) {
@@ -43,26 +39,23 @@ export function VersionPanel({ store, map, fontsReady, onClose, onRestore }: Pro
   };
 
   return (
-    <aside className="panel versions" aria-label="Sürüm geçmişi">
+    <aside className="panel versions" aria-label={t('versions.title')}>
       <div className="sc-head">
-        <strong>Sürüm geçmişi</strong>
-        <button className="ib" aria-label="Kapat" onClick={onClose}>×</button>
+        <strong>{t('versions.title')}</strong>
+        <button className="ib" aria-label={t('common.close')} onClick={onClose}>×</button>
       </div>
-      <p className="muted small">
-        Keizu bu cihazda haritanın eski hallerini kendiliğinden saklar: açarken, kapatırken ve düzenlerken en çok beş dakikada bir.
-        Eski sürümler zamanla seyreltilir.
-      </p>
+      <p className="muted small">{t('versions.intro')}</p>
       {picked && (
         <div className="version-preview">
           <Preview map={picked.map} fontsReady={fontsReady} />
           <div className="row">
-            <button className="btn primary" onClick={() => onRestore(picked.map)}>Bu sürümü geri yükle</button>
-            <button className="btn" onClick={() => setPicked(null)}>Vazgeç</button>
+            <button className="btn primary" onClick={() => onRestore(picked.map)}>{t('versions.restore')}</button>
+            <button className="btn" onClick={() => setPicked(null)}>{t('common.cancel')}</button>
           </div>
         </div>
       )}
       {versions === null ? null : versions.length === 0 ? (
-        <p className="muted small">Henüz kayıtlı sürüm yok. Düzenledikçe burada birikir.</p>
+        <p className="muted small">{t('versions.empty')}</p>
       ) : (
         <ul className="version-list">
           {versions.map((v) => (
@@ -71,7 +64,7 @@ export function VersionPanel({ store, map, fontsReady, onClose, onRestore }: Pro
                 <I.History size={16} />
                 <span className="v-main">
                   <span>{stamp(v.savedAt)}</span>
-                  <span className="muted">{REASON[v.reason]} · {v.topics} konu</span>
+                  <span className="muted">{reasonLabel(v.reason)} · {t('common.topics', { n: v.topics })}</span>
                 </span>
               </button>
             </li>
@@ -94,7 +87,7 @@ function Preview({ map, fontsReady }: { map: MindMap; fontsReady: number }) {
       viewBox={`${minX - pad} ${minY - pad} ${maxX - minX + pad * 2} ${maxY - minY + pad * 2}`}
       style={{ background: theme.canvas }}
       role="img"
-      aria-label={`${map.title} önizlemesi`}
+      aria-label={t('versions.preview', { title: map.title })}
     >
       <MapSvg map={map} layout={layout} theme={theme} />
     </svg>

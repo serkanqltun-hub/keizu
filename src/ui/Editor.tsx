@@ -1,8 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { initHistory, push, redo, undo, type History } from '../core/history';
 import { layoutMap, type MapLayout } from '../core/layout';
+import { outlineRows } from '../core/outline';
 import {
   addChild,
+  findParent,
+  indentTopic,
+  moveAmongSiblings,
+  outdentTopic,
+  revealTopic,
+  setBranchLayout,
   addSibling,
   addFloating,
   addRelation,
@@ -35,6 +42,11 @@ import { FormatPanel } from './FormatPanel';
 import * as I from './Icons';
 import { MapCanvas, type CanvasHandle } from './MapCanvas';
 import { canvasMeasure } from './measure';
+import { OutlineView } from './OutlineView';
+import { CommandPalette, type PaletteCommand } from './CommandPalette';
+import { KeysDialog, cmdLabel, fmt } from './KeysDialog';
+import { COMMANDS, commandFor, comboFromEvent, useKeymap, type CommandId } from './keymap';
+import { LANGS, getLang, setLang, t } from '../i18n';
 
 type Dir = 'left' | 'right' | 'up' | 'down';
 
@@ -55,19 +67,34 @@ function nearest(layout: MapLayout, fromId: string, dir: Dir): string | undefine
   return best?.id;
 }
 
-const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+type ViewMode = 'map' | 'outline';
+const VIEW_KEY = 'keizu:view';
+
+function savedView(): ViewMode {
+  try {
+    return globalThis.localStorage?.getItem(VIEW_KEY) === 'outline' ? 'outline' : 'map';
+  } catch {
+    return 'map';
+  }
+}
 
 interface Props {
   initial: MindMap;
   store: LibraryStore;
   fontsReady: number;
+  /** Topic to select (and reveal) when the map opens, e.g. from a search. */
+  focusId?: string;
   onBack(): void;
 }
 
-export function Editor({ initial, store, fontsReady, onBack }: Props) {
-  const [hist, setHist] = useState<History<MindMap>>(() => initHistory(initial));
+export function Editor({ initial, store, fontsReady, focusId, onBack }: Props) {
+  const [hist, setHist] = useState<History<MindMap>>(() => initHistory(focusId ? revealTopic(initial, focusId) : initial));
   const map = hist.present;
-  const [selectedId, setSelectedId] = useState<string | null>(initial.roots[0].id);
+  const startId = focusId && findTopic(initial, focusId) ? focusId : initial.roots[0].id;
+  const [selectedId, setSelectedId] = useState<string | null>(startId);
+  const [view, setView] = useState<ViewMode>(savedView);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const keymap = useKeymap();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editSeed, setEditSeed] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
@@ -75,7 +102,7 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
   const [zoom, setZoom] = useState(1);
   const [saved, setSaved] = useState<'saved' | 'saving'>('saved');
   const [exportOpen, setExportOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   // The file on disk this map is mirrored to, and whether the last write worked.
@@ -145,7 +172,7 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
   useEffect(() => {
     if (map === initial) return;
     setSaved('saving');
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       const next = { ...map, version: map.version + 1 };
       store
         .save(next)
@@ -156,11 +183,11 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
             store.addVersion(next, 'auto').catch(() => {});
           }
         })
-        .catch(() => setToast('Kaydedilemedi: tarayıcı deposu dolu olabilir.'));
+        .catch(() => setToast(t('toast.storageFull')));
       const f = fileRef.current;
       if (f.fileState !== 'needs-permission') writeFile(next, f.link, false);
     }, 400);
-    return () => clearTimeout(t);
+    return () => clearTimeout(timer);
   }, [map, initial, store, writeFile]);
 
   /** "Save to computer": writes the linked file, or asks where to keep one. */
@@ -168,7 +195,7 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
     try {
       if (link && !saveAs) {
         await writeFile(map, link, true);
-        setToast(`${link.name} dosyasına kaydedildi`);
+        setToast(t('toast.savedTo', { name: link.name }));
         return;
       }
       const target = await chooseSaveTarget(`${safeFileName(map.title)}.keizu`);
@@ -177,13 +204,13 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
         await store.setLink(map.id, target).catch(() => {});
         setLink(target);
         await writeFile(map, target, true);
-        setToast(`${target.name} dosyasına kaydedildi. Değişiklikler bu dosyaya otomatik yazılacak.`);
+        setToast(t('toast.linked', { name: target.name }));
       } else if (!canLinkFiles()) {
         // Browsers without file handles: a one-off download.
-        if (await exportKeizu(map)) setToast('Dosya indirildi');
+        if (await exportKeizu(map)) setToast(t('toast.downloaded'));
       }
     } catch (err) {
-      setToast((err as Error).message || 'Kaydedilemedi');
+      setToast((err as Error).message || t('toast.saveFailed'));
     }
   };
 
@@ -191,7 +218,7 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
     await store.setLink(map.id, undefined);
     setLink(undefined);
     setFileState('ok');
-    setToast('Dosya bağlantısı kaldırıldı; harita bu cihazda kalmaya devam ediyor');
+    setToast(t('toast.unlinked'));
   };
 
   const pickImage = async (file: File) => {
@@ -200,14 +227,14 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
       const img = await loadImageFile(file);
       commit(setTopicImage(map, selectedId, img.dataUrl, img.width, img.height));
     } catch (err) {
-      setToast((err as Error).message || 'Görsel eklenemedi');
+      setToast((err as Error).message || t('toast.imageFailed'));
     }
   };
 
   useEffect(() => {
     if (!toast) return;
-    const t = setTimeout(() => setToast(null), 2600);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setToast(null), 2600);
+    return () => clearTimeout(timer);
   }, [toast]);
 
   // If the selected topic disappears (undo, collapse), fall back to the root.
@@ -221,16 +248,60 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
     setEditingId(id);
   };
 
+  const rows = useMemo(() => (view === 'outline' ? outlineRows(map) : []), [map, view]);
+
+  /** Selects a topic anywhere in the map, opening collapsed branches on the way. */
+  const goTo = (id: string) => {
+    const shown = revealTopic(map, id);
+    if (shown !== map) commit(shown);
+    selectTopic(id);
+    setSelectedRelId(null);
+    if (view === 'map') setTimeout(() => canvas.current?.centerOn(id), 0);
+  };
+
+  const switchView = (next: ViewMode) => {
+    setView(next);
+    setEditingId(null);
+    try {
+      localStorage.setItem(VIEW_KEY, next);
+    } catch {
+      /* not remembered */
+    }
+  };
+
+  const navigate = (dir: Dir) => {
+    const id = selectedId ?? mainId;
+    if (view === 'map') {
+      const next = nearest(layout, id, dir);
+      if (next) selectTopic(next);
+      return;
+    }
+    const i = rows.findIndex((r) => r.topic.id === id);
+    const row = rows[i];
+    if (!row) return selectTopic(mainId);
+    if (dir === 'up' && i > 0) selectTopic(rows[i - 1].topic.id);
+    if (dir === 'down' && i < rows.length - 1) selectTopic(rows[i + 1].topic.id);
+    const tp = row.topic;
+    if (dir === 'left') {
+      if (tp.children.length && !tp.collapsed && tp.id !== mainId) commit(toggleCollapse(map, tp.id));
+      else if (row.parentId) selectTopic(row.parentId);
+    }
+    if (dir === 'right') {
+      if (tp.collapsed) commit(toggleCollapse(map, tp.id));
+      else if (tp.children.length) selectTopic(tp.children[0].id);
+    }
+  };
+
   const actions = {
     addChild() {
       if (!selectedId) return;
-      const r = addChild(map, selectedId, selectedId === mainId ? 'Ana konu' : 'Alt konu');
+      const r = addChild(map, selectedId, selectedId === mainId ? t('topic.main') : t('topic.sub'));
       commit(r.map, r.id);
       startEdit(r.id);
     },
     addSibling(before = false) {
       if (!selectedId) return;
-      const r = addSibling(map, selectedId, selectedId === mainId ? 'Ana konu' : 'Konu', before);
+      const r = addSibling(map, selectedId, selectedId === mainId ? t('topic.main') : t('topic.default'), before);
       commit(r.map, r.id);
       startEdit(r.id);
     },
@@ -253,7 +324,7 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
       if (!selected) return;
       clipboard.current = selected;
       if (cut && selectedId !== mainId) actions.remove();
-      setToast(cut ? 'Konu kesildi' : 'Konu kopyalandı');
+      setToast(cut ? t('toast.cut') : t('toast.copied'));
     },
     paste() {
       if (!selectedId || !clipboard.current) return;
@@ -262,73 +333,108 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
     },
     relation() {
       if (!selectedId) return;
+      if (view !== 'map') switchView('map');
       setRelationFrom(selectedId);
-      setToast('İlişkinin gideceği konuya tıkla (iptal: Esc)');
+      setToast(t('toast.pickRelation'));
     },
     floating(pos = { x: 0, y: (layout.bounds.maxY ?? 0) + 120 }) {
-      const r = addFloating(map, pos);
+      const r = addFloating(map, pos, t('topic.floating'));
       commit(r.map, r.id);
       startEdit(r.id);
     },
     note() {
       setPanelOpen(true);
+      setHistoryOpen(false);
       setPanelTab('style');
       setTimeout(() => document.getElementById('note-field')?.focus(), 0);
     },
+    move(id: string | null, fn: (m: MindMap, id: string) => MindMap) {
+      if (!id) return;
+      const next = fn(map, id);
+      if (next !== map) commit(next, id);
+    },
   };
 
-  // Keyboard shortcuts (inactive while typing in a field).
+  /** Everything the keyboard and the command palette can run. */
+  const commands: Record<CommandId, { run(): void; enabled?: boolean }> = {
+    palette: { run: () => setPaletteOpen((v) => !v) },
+    shortcuts: { run: () => setKeysOpen((v) => !v) },
+    language: { run: () => setLang(getLang() === 'tr' ? 'en' : 'tr') },
+    back: { run: onBack },
+    addChild: { run: actions.addChild, enabled: !!selectedId },
+    addSibling: { run: () => actions.addSibling(), enabled: !!selectedId },
+    addSiblingBefore: { run: () => actions.addSibling(true), enabled: !!selectedId },
+    edit: { run: () => selectedId && startEdit(selectedId), enabled: !!selectedId },
+    remove: { run: actions.remove, enabled: !!selectedRelId || (!!selectedId && selectedId !== mainId) },
+    undo: { run: actions.undo, enabled: hist.past.length > 0 },
+    redo: { run: actions.redo, enabled: hist.future.length > 0 },
+    copy: { run: () => actions.copy(), enabled: !!selected },
+    cut: { run: () => actions.copy(true), enabled: !!selected && selectedId !== mainId },
+    paste: { run: actions.paste, enabled: !!selectedId && !!clipboard.current },
+    collapse: { run: actions.collapse, enabled: !!selected?.children.length && selectedId !== mainId },
+    moveUp: { run: () => actions.move(selectedId, (m, id) => moveAmongSiblings(m, id, -1)), enabled: !!selectedId },
+    moveDown: { run: () => actions.move(selectedId, (m, id) => moveAmongSiblings(m, id, 1)), enabled: !!selectedId },
+    indent: { run: () => actions.move(selectedId, indentTopic), enabled: !!selectedId },
+    outdent: { run: () => actions.move(selectedId, outdentTopic), enabled: !!selectedId },
+    navLeft: { run: () => navigate('left') },
+    navRight: { run: () => navigate('right') },
+    navUp: { run: () => navigate('up') },
+    navDown: { run: () => navigate('down') },
+    relation: { run: actions.relation, enabled: !!selectedId },
+    floating: { run: () => actions.floating() },
+    note: { run: actions.note, enabled: !!selectedId },
+    save: { run: () => saveToFile() },
+    saveAs: { run: () => saveToFile(true), enabled: canLinkFiles() },
+    toggleOutline: { run: () => switchView(view === 'map' ? 'outline' : 'map') },
+    zoomIn: { run: () => canvas.current?.zoomBy(1.2), enabled: view === 'map' },
+    zoomOut: { run: () => canvas.current?.zoomBy(1 / 1.2), enabled: view === 'map' },
+    fit: { run: () => canvas.current?.fit(), enabled: view === 'map' },
+    centerSelected: { run: () => selectedId && canvas.current?.centerOn(selectedId), enabled: view === 'map' && !!selectedId },
+    history: { run: () => setHistoryOpen((v) => !v) },
+    panel: { run: () => setPanelOpen((v) => !v) },
+  };
+
+  // Keyboard shortcuts (inactive while typing in a field or a dialog is open).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editingId) return;
+      if (editingId || keysOpen) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      const mod = isMac ? e.metaKey : e.ctrlKey;
-      const k = e.key;
-      const handled = () => e.preventDefault();
-
-      if (mod) {
-        const lower = k.toLowerCase();
-        if (lower === 'z' && !e.shiftKey) return handled(), actions.undo();
-        if ((lower === 'z' && e.shiftKey) || lower === 'y') return handled(), actions.redo();
-        if (lower === 'c') return handled(), actions.copy();
-        if (lower === 'x') return handled(), actions.copy(true);
-        if (lower === 'v') return handled(), actions.paste();
-        if (lower === 's') return handled(), saveToFile(e.shiftKey);
-        if (k === '/') return handled(), actions.collapse();
-        if (k === '=' || k === '+') return handled(), canvas.current?.zoomBy(1.2);
-        if (k === '-') return handled(), canvas.current?.zoomBy(1 / 1.2);
-        if (k === '0') return handled(), canvas.current?.fit();
+      const combo = comboFromEvent(e);
+      if (!combo) return;
+      if (paletteOpen && combo !== 'Mod+K') return;
+      const id = commandFor(keymap, combo, view === 'outline');
+      if (id) {
+        e.preventDefault();
+        // Arrow keys and editing keys act on the selected relation, if any.
+        if (selectedRelId && ['navLeft', 'navRight', 'navUp', 'navDown', 'edit'].includes(id)) return;
+        const c = commands[id];
+        if (c.enabled !== false) c.run();
         return;
       }
-      if (k === 'Tab' || k === 'Insert') return handled(), actions.addChild();
-      if (k === 'Enter') return handled(), actions.addSibling(e.shiftKey);
-      if (k === 'Delete' || k === 'Backspace') return handled(), actions.remove();
-      if (selectedRelId) return;
-      if (k === 'F2' || k === ' ') return handled(), selectedId && startEdit(selectedId);
-      if (k === 'Escape') {
-        handled();
+      if (e.key === 'Escape') {
+        e.preventDefault();
         if (relationFrom) setRelationFrom(null);
         else selectTopic(null), setSelectedRelId(null);
         return;
       }
-      if (k === '?') return handled(), setHelpOpen((v) => !v);
-      if (k.startsWith('Arrow')) {
-        handled();
-        const id = selectedId ?? mainId;
-        const next = nearest(layout, id, k.slice(5).toLowerCase() as Dir);
-        if (next) selectTopic(next);
-        return;
-      }
       // Typing a character starts editing with that character.
-      if (k.length === 1 && !e.altKey && selectedId) {
-        handled();
-        startEdit(selectedId, k);
+      if (e.key.length === 1 && !e.altKey && !e.ctrlKey && !e.metaKey && selectedId && !selectedRelId) {
+        e.preventDefault();
+        startEdit(selectedId, e.key);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
+
+  const paletteCommands: PaletteCommand[] = COMMANDS.filter((c) => c.id !== 'palette' && (!c.outlineOnly || view === 'outline')).map((c) => ({
+    id: c.id,
+    label: c.id === 'language' ? `${cmdLabel(c.id)}: ${LANGS.find((l) => l.id !== getLang())!.name}` : cmdLabel(c.id),
+    keys: keymap[c.id].map(fmt),
+    disabled: commands[c.id].enabled === false,
+    run: commands[c.id].run,
+  }));
 
   const runExport = async (kind: 'png' | 'svg' | 'pdf' | 'md' | 'opml' | 'keizu' | 'json') => {
     setExportOpen(false);
@@ -341,53 +447,80 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
       if (kind === 'keizu') await exportKeizu(map);
       if (kind === 'json') await exportPlainJson(map);
     } catch (err) {
-      setToast((err as Error).message || 'Dışa aktarma başarısız oldu');
+      setToast((err as Error).message || t('toast.exportFailed'));
     }
   };
 
-  const modKey = isMac ? '⌘' : 'Ctrl';
+  /** "Undo (Ctrl+Z)": a tooltip with the command's first shortcut. */
+  const tip = (id: CommandId, label = cmdLabel(id)) => (keymap[id][0] ? `${label} (${fmt(keymap[id][0])})` : label);
+
+  const commitEdit = (id: string, text: string) => {
+    setEditingId(null);
+    setEditSeed(null);
+    const tp = findTopic(map, id);
+    const clean = text.replace(/\s+$/g, '');
+    if (tp && clean && clean !== tp.text) commit(updateTopic(map, id, { text: clean }));
+  };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditSeed(null);
+  };
+
+  const layoutName = (k: MindMap['layout']) => t(`layout.${k}`);
+  // What the selected branch would use without its own layout setting.
+  const parentBox = selectedId ? layout.byId.get(layout.byId.get(selectedId)?.parentId ?? '') : undefined;
+  const inheritedLayout = parentBox?.layout ?? map.layout;
 
   return (
     <div className={`editor ${theme.dark ? 'dark-map' : ''}`}>
       <header className="topbar">
         <div className="tb-left">
-          <button className="ib" aria-label="Haritalara dön" title="Haritalara dön" onClick={onBack}>
+          <button className="ib" aria-label={t('editor.back')} title={t('editor.back')} onClick={onBack}>
             <I.Menu size={20} />
           </button>
           <div className="logo-mark"><I.Logo /></div>
           <div className="doc-title">
             <span className="name">{map.title}</span>
             {link && fileState === 'needs-permission' ? (
-              <button className="status warn" onClick={() => saveToFile()} title="Tarayıcı, dosyaya yazmak için yeniden izin istiyor">
-                {link.name} dosyasına yazmak için izin ver
+              <button className="status warn" onClick={() => saveToFile()} title={t('file.permissionTip')}>
+                {t('file.permission', { name: link.name })}
               </button>
             ) : link && fileState === 'error' ? (
-              <button className="status warn" onClick={() => saveToFile()} title="Yeniden dene">
-                {link.name} dosyasına yazılamadı, yeniden dene
+              <button className="status warn" onClick={() => saveToFile()} title={t('common.retry')}>
+                {t('file.writeFailed', { name: link.name })}
               </button>
             ) : (
               <span className={`status ${saved}`} title={link ? (link.kind === 'path' ? link.path : link.name) : undefined}>
-                {saved === 'saved' ? <><I.Check size={13} /> {link ? `Kaydedildi · ${link.name}` : 'Bu cihaza kaydedildi'}</> : 'Kaydediliyor…'}
+                {saved === 'saved' ? <><I.Check size={13} /> {link ? t('file.savedTo', { name: link.name }) : t('file.savedHere')}</> : t('file.saving')}
               </span>
             )}
           </div>
           <div className="tb-group">
-            <button className="ib" aria-label="Geri al" title={`Geri al (${modKey}+Z)`} disabled={!hist.past.length} onClick={actions.undo}><I.Undo /></button>
-            <button className="ib" aria-label="Yinele" title={`Yinele (${modKey}+Shift+Z)`} disabled={!hist.future.length} onClick={actions.redo}><I.Redo /></button>
+            <button className="ib" aria-label={cmdLabel('undo')} title={tip('undo')} disabled={!hist.past.length} onClick={actions.undo}><I.Undo /></button>
+            <button className="ib" aria-label={cmdLabel('redo')} title={tip('redo')} disabled={!hist.future.length} onClick={actions.redo}><I.Redo /></button>
           </div>
+          <div className="seg view-switch" role="group" aria-label={t('view.label')}>
+            <button className={view === 'map' ? 'on' : ''} aria-pressed={view === 'map'} title={tip('toggleOutline', t('view.map'))} onClick={() => switchView('map')}>
+              <I.MapIcon size={16} /><span>{t('view.map')}</span>
+            </button>
+            <button className={view === 'outline' ? 'on' : ''} aria-pressed={view === 'outline'} title={tip('toggleOutline', t('view.outline'))} onClick={() => switchView('outline')}>
+              <I.OutlineIcon size={16} /><span>{t('view.outline')}</span>
+            </button>
+          </div>
+          <button className="ib" aria-label={cmdLabel('palette')} title={tip('palette')} onClick={() => setPaletteOpen(true)}><I.Command /></button>
         </div>
 
-        <nav className="tb-center" aria-label="Ekle">
-          <button className="tb" title="Kardeş konu (Enter)" disabled={!selectedId} onClick={() => actions.addSibling()}><I.TopicIcon />Konu</button>
-          <button className="tb" title="Alt konu (Tab)" disabled={!selectedId} onClick={actions.addChild}><I.SubtopicIcon />Alt konu</button>
-          <button className={`tb ${relationFrom ? 'on' : ''}`} title="İlişki oku: başka bir konuya bağla" disabled={!selectedId} onClick={actions.relation}><I.RelationIcon />İlişki</button>
-          <button className="tb" title="Serbest konu (boş alana çift tıkla)" onClick={() => actions.floating()}><I.FloatingIcon />Serbest konu</button>
-          <button className="tb" title="İşaret ekle" disabled={!selectedId} onClick={() => { setPanelOpen(true); setPanelTab('style'); }}><I.MarkerIcon />İşaret</button>
-          <button className="tb" title="Not ekle" disabled={!selectedId} onClick={actions.note}><I.NoteIcon />Not</button>
+        <nav className="tb-center" aria-label={t('editor.insert')}>
+          <button className="tb" title={tip('addSibling')} disabled={!selectedId} onClick={() => actions.addSibling()}><I.TopicIcon />{t('tb.topic')}</button>
+          <button className="tb" title={tip('addChild')} disabled={!selectedId} onClick={actions.addChild}><I.SubtopicIcon />{t('tb.subtopic')}</button>
+          <button className={`tb ${relationFrom ? 'on' : ''}`} title={t('tb.relationTip')} disabled={!selectedId} onClick={actions.relation}><I.RelationIcon />{t('tb.relation')}</button>
+          <button className="tb" title={t('tb.floatingTip')} onClick={() => actions.floating()}><I.FloatingIcon />{t('tb.floating')}</button>
+          <button className="tb" title={t('tb.markerTip')} disabled={!selectedId} onClick={() => { setPanelOpen(true); setHistoryOpen(false); setPanelTab('style'); }}><I.MarkerIcon />{t('tb.marker')}</button>
+          <button className="tb" title={t('tb.noteTip')} disabled={!selectedId} onClick={actions.note}><I.NoteIcon />{t('tb.note')}</button>
           {selected?.image ? (
-            <button className="tb" title="Konudaki görseli kaldır" onClick={() => selectedId && commit(removeTopicImage(map, selectedId))}><I.ImageIcon />Görseli kaldır</button>
+            <button className="tb" title={t('tb.removeImageTip')} onClick={() => selectedId && commit(removeTopicImage(map, selectedId))}><I.ImageIcon />{t('tb.removeImage')}</button>
           ) : (
-            <button className="tb" title="Konuya görsel ekle" disabled={!selectedId} onClick={() => imageInput.current?.click()}><I.ImageIcon />Görsel</button>
+            <button className="tb" title={t('tb.imageTip')} disabled={!selectedId} onClick={() => imageInput.current?.click()}><I.ImageIcon />{t('tb.image')}</button>
           )}
           <input
             ref={imageInput}
@@ -400,105 +533,122 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
               e.target.value = '';
             }}
           />
-          <button className="tb" title={`Daralt / genişlet (${modKey}+/)`} disabled={!selected?.children.length || selectedId === mainId} onClick={actions.collapse}><I.Collapse />Daralt</button>
-          <button className="tb" title="Sil (Delete)" disabled={!selectedRelId && (!selectedId || selectedId === mainId)} onClick={actions.remove}><I.Trash />Sil</button>
+          <button className="tb" title={tip('collapse')} disabled={!selected?.children.length || selectedId === mainId} onClick={actions.collapse}><I.Collapse />{t('tb.collapse')}</button>
+          <button className="tb" title={tip('remove')} disabled={!selectedRelId && (!selectedId || selectedId === mainId)} onClick={actions.remove}><I.Trash />{t('tb.delete')}</button>
         </nav>
 
         <div className="tb-right">
           <button
             className={`btn ${link ? '' : 'primary'}`}
-            title={link ? `${link.name} dosyasına kaydet (${modKey}+S)` : `Haritayı dosya olarak kaydet (${modKey}+S)`}
+            title={link ? `${t('file.saveToTip', { name: link.name })} (${fmt(keymap.save[0] ?? 'Mod+S')})` : tip('save', t('file.saveTip'))}
             onClick={() => saveToFile()}
           >
-            <I.Save size={16} /> {isDesktop ? 'Kaydet' : 'Bilgisayara kaydet'}
+            <I.Save size={16} /> {isDesktop ? t('file.save') : t('file.saveToComputer')}
           </button>
           <div className="menu-wrap">
             <button className="btn" aria-haspopup="menu" aria-expanded={exportOpen} onClick={() => setExportOpen((v) => !v)}>
-              <I.Export size={16} /> Dışa aktar
+              <I.Export size={16} /> {t('export.menu')}
             </button>
             {exportOpen && (
               <div className="menu" role="menu" onMouseLeave={() => setExportOpen(false)}>
                 {canLinkFiles() && (
-                  <button role="menuitem" onClick={() => { setExportOpen(false); saveToFile(true); }}>Farklı kaydet…</button>
+                  <button role="menuitem" onClick={() => { setExportOpen(false); saveToFile(true); }}>{t('export.saveAs')}</button>
                 )}
                 {link && (
-                  <button role="menuitem" onClick={() => { setExportOpen(false); unlinkFile(); }}>Dosya bağlantısını kaldır</button>
+                  <button role="menuitem" onClick={() => { setExportOpen(false); unlinkFile(); }}>{t('export.unlink')}</button>
                 )}
                 {(canLinkFiles() || link) && <hr />}
-                <button role="menuitem" onClick={() => runExport('png')}>PNG görsel</button>
-                <button role="menuitem" onClick={() => runExport('svg')}>SVG vektör</button>
+                <button role="menuitem" onClick={() => runExport('png')}>{t('export.png')}</button>
+                <button role="menuitem" onClick={() => runExport('svg')}>{t('export.svg')}</button>
                 <button role="menuitem" onClick={() => runExport('pdf')}>PDF</button>
                 <button role="menuitem" onClick={() => runExport('md')}>Markdown</button>
-                <button role="menuitem" onClick={() => runExport('opml')}>OPML (ana hat)</button>
-                <button role="menuitem" onClick={() => runExport('keizu')}>Keizu dosyası (.keizu)</button>
-                <button role="menuitem" onClick={() => runExport('json')}>Düz JSON (git dostu)</button>
+                <button role="menuitem" onClick={() => runExport('opml')}>{t('export.opml')}</button>
+                <button role="menuitem" onClick={() => runExport('keizu')}>{t('export.keizu')}</button>
+                <button role="menuitem" onClick={() => runExport('json')}>{t('export.json')}</button>
               </div>
             )}
           </div>
-          <button className={`ib ${historyOpen ? 'on' : ''}`} aria-label="Sürüm geçmişi" aria-pressed={historyOpen} title="Sürüm geçmişi" onClick={() => setHistoryOpen((v) => !v)}><I.History /></button>
-          <button className="ib" aria-label="Klavye kısayolları" title="Klavye kısayolları (?)" onClick={() => setHelpOpen((v) => !v)}><I.Keyboard /></button>
-          <button className={`ib ${panelOpen ? 'on' : ''}`} aria-label="Biçim paneli" aria-pressed={panelOpen} title="Biçim paneli" onClick={() => setPanelOpen((v) => !v)}><I.Panel /></button>
+          <button className={`ib ${historyOpen ? 'on' : ''}`} aria-label={cmdLabel('history')} aria-pressed={historyOpen} title={tip('history')} onClick={() => setHistoryOpen((v) => !v)}><I.History /></button>
+          <button className="ib" aria-label={cmdLabel('shortcuts')} title={tip('shortcuts')} onClick={() => setKeysOpen(true)}><I.Keyboard /></button>
+          <button className={`ib ${panelOpen ? 'on' : ''}`} aria-label={cmdLabel('panel')} aria-pressed={panelOpen} title={tip('panel')} onClick={() => setPanelOpen((v) => !v)}><I.Panel /></button>
         </div>
       </header>
 
       <div className="workspace">
         <main className="canvas-area">
-          <MapCanvas
-            ref={canvas}
-            map={map}
-            layout={layout}
-            theme={theme}
-            selectedId={selectedId}
-            editingId={editingId}
-            editSeed={editSeed}
-            onSelect={selectTopic}
-            selectedRelId={selectedRelId}
-            relationFrom={relationFrom}
-            onSelectRelation={(id) => {
-              setSelectedRelId(id);
-              setSelectedId(null);
-              setPanelOpen(true);
-              setPanelTab('style');
-            }}
-            onPickRelationTarget={(id) => {
-              if (relationFrom && id !== relationFrom) {
-                const r = addRelation(map, relationFrom, id);
-                if (r.id) {
-                  commit(r.map);
-                  setSelectedRelId(r.id);
-                  setSelectedId(null);
+          {view === 'map' ? (
+            <MapCanvas
+              ref={canvas}
+              map={map}
+              layout={layout}
+              theme={theme}
+              selectedId={selectedId}
+              editingId={editingId}
+              editSeed={editSeed}
+              focusId={startId}
+              onSelect={selectTopic}
+              selectedRelId={selectedRelId}
+              relationFrom={relationFrom}
+              onSelectRelation={(id) => {
+                setSelectedRelId(id);
+                setSelectedId(null);
+                setPanelOpen(true);
+                setPanelTab('style');
+              }}
+              onPickRelationTarget={(id) => {
+                if (relationFrom && id !== relationFrom) {
+                  const r = addRelation(map, relationFrom, id);
+                  if (r.id) {
+                    commit(r.map);
+                    setSelectedRelId(r.id);
+                    setSelectedId(null);
+                  }
                 }
-              }
-              setRelationFrom(null);
-              setToast(null);
-            }}
-            onFloat={(id, pos) => commit(floatTopic(map, id, pos), id)}
-            onCreateFloating={(pos) => actions.floating(pos)}
-            onStartEdit={(id) => startEdit(id)}
-            onCommitEdit={(id, text) => {
-              setEditingId(null);
-              setEditSeed(null);
-              const t = findTopic(map, id);
-              const clean = text.replace(/\s+$/g, '');
-              if (t && clean && clean !== t.text) commit(updateTopic(map, id, { text: clean }));
-            }}
-            onCancelEdit={() => {
-              setEditingId(null);
-              setEditSeed(null);
-            }}
-            onMove={(id, parent) => commit(moveTopic(map, id, parent))}
-            onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
-            onZoomChange={setZoom}
-          />
-          <div className="chip stats">{countAll(map)} konu · {map.layout === 'mindmap' ? 'Zihin haritası' : map.layout === 'logic' ? 'Mantık şeması' : 'Organizasyon şeması'}</div>
-          <div className="zoom">
-            <button className="ib" aria-label="Uzaklaştır" onClick={() => canvas.current?.zoomBy(1 / 1.2)}><I.Minus size={16} /></button>
-            <span>{Math.round(zoom * 100)}%</span>
-            <button className="ib" aria-label="Yakınlaştır" onClick={() => canvas.current?.zoomBy(1.2)}><I.Plus size={16} /></button>
-            <span className="sep" />
-            <button className="ib" aria-label="Haritayı sığdır" title={`Sığdır (${modKey}+0)`} onClick={() => canvas.current?.fit()}><I.Target size={16} /></button>
-          </div>
-          {helpOpen && <Shortcuts modKey={modKey} onClose={() => setHelpOpen(false)} />}
+                setRelationFrom(null);
+                setToast(null);
+              }}
+              onFloat={(id, pos) => commit(floatTopic(map, id, pos), id)}
+              onCreateFloating={(pos) => actions.floating(pos)}
+              onStartEdit={(id) => startEdit(id)}
+              onCommitEdit={commitEdit}
+              onCancelEdit={cancelEdit}
+              onMove={(id, parent) => commit(moveTopic(map, id, parent))}
+              onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
+              onZoomChange={setZoom}
+            />
+          ) : (
+            <OutlineView
+              map={map}
+              selectedId={selectedId}
+              editingId={editingId}
+              editSeed={editSeed}
+              colorOf={(id) => {
+                const b = layout.byId.get(id);
+                if (b) return b.color;
+                // Hidden in a collapsed branch on the map: use the nearest shown ancestor.
+                for (let p = findParent(map, id); p; p = findParent(map, p.id)) {
+                  const pb = layout.byId.get(p.id);
+                  if (pb) return pb.color;
+                }
+                return theme.mono;
+              }}
+              onSelect={selectTopic}
+              onStartEdit={(id) => startEdit(id)}
+              onCommitEdit={commitEdit}
+              onCancelEdit={cancelEdit}
+              onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
+            />
+          )}
+          <div className="chip stats">{t('editor.stats', { n: countAll(map), layout: layoutName(map.layout) })}</div>
+          {view === 'map' && (
+            <div className="zoom">
+              <button className="ib" aria-label={cmdLabel('zoomOut')} title={tip('zoomOut')} onClick={() => canvas.current?.zoomBy(1 / 1.2)}><I.Minus size={16} /></button>
+              <span>{Math.round(zoom * 100)}%</span>
+              <button className="ib" aria-label={cmdLabel('zoomIn')} title={tip('zoomIn')} onClick={() => canvas.current?.zoomBy(1.2)}><I.Plus size={16} /></button>
+              <span className="sep" />
+              <button className="ib" aria-label={cmdLabel('fit')} title={tip('fit')} onClick={() => canvas.current?.fit()}><I.Target size={16} /></button>
+            </div>
+          )}
           {toast && <div className="toast" role="status">{toast}</div>}
         </main>
 
@@ -511,7 +661,7 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
             onRestore={async (old) => {
               await store.addVersion(map, 'restore').catch(() => {});
               commit({ ...old, id: map.id, version: map.version, updatedAt: new Date().toISOString() }, old.roots[0].id);
-              setToast(`Sürüm geri yüklendi (geri almak için ${modKey}+Z)`);
+              setToast(t('toast.restored', { key: fmt(keymap.undo[0] ?? 'Mod+Z') }));
             }}
           />
         )}
@@ -524,49 +674,22 @@ export function Editor({ initial, store, fontsReady, onBack }: Props) {
             onRelationLabel={(label) => selectedRelId && commit(updateRelation(map, selectedRelId, { label: label || undefined }))}
             onRelationDelete={() => actions.remove()}
             isRoot={selectedId === mainId}
+            inheritedLayout={inheritedLayout}
             tab={panelTab}
             onTab={setPanelTab}
             onStyle={(p) => selectedId && commit(updateStyle(map, selectedId, p))}
+            onBranchLayout={(k) => selectedId && commit(setBranchLayout(map, selectedId, k))}
             onMarker={(m) => selectedId && commit(toggleMarker(map, selectedId, m))}
             onNote={(n) => selectedId && commit(updateTopic(map, selectedId, { note: n || undefined }))}
             onMap={(p) => commit(setMapProps(map, p))}
           />
         )}
       </div>
-    </div>
-  );
-}
 
-function Shortcuts({ modKey, onClose }: { modKey: string; onClose(): void }) {
-  const rows: [string, string][] = [
-    ['Tab', 'Alt konu ekle'],
-    ['Enter', 'Kardeş konu ekle (Shift ile öncesine)'],
-    ['F2, Boşluk veya yazmaya başla', 'Metni düzenle'],
-    ['Shift+Enter (düzenlerken)', 'Yeni satır'],
-    ['Delete', 'Konuyu sil'],
-    ['Ok tuşları', 'Konular arasında gezin'],
-    [`${modKey}+/`, 'Daralt / genişlet'],
-    [`${modKey}+S, ${modKey}+Shift+S`, 'Dosyaya kaydet, farklı kaydet'],
-    [`${modKey}+Z, ${modKey}+Shift+Z`, 'Geri al, yinele'],
-    [`${modKey}+C / X / V`, 'Konuyu kopyala, kes, yapıştır'],
-    [`${modKey}+tekerlek, ${modKey}+0`, 'Yakınlaştır, sığdır'],
-    ['Sürükle', 'Konuyu başka bir konunun altına taşı'],
-    ['Boş alana sürükle veya çift tıkla', 'Serbest konu (ayrı ağaç)'],
-  ];
-  return (
-    <div className="shortcuts" role="dialog" aria-label="Klavye kısayolları">
-      <div className="sc-head">
-        <strong>Klavye kısayolları</strong>
-        <button className="ib" aria-label="Kapat" onClick={onClose}>×</button>
-      </div>
-      <dl>
-        {rows.map(([k, v]) => (
-          <div key={k}>
-            <dt><kbd>{k}</kbd></dt>
-            <dd>{v}</dd>
-          </div>
-        ))}
-      </dl>
+      {paletteOpen && (
+        <CommandPalette map={map} commands={paletteCommands} onPickTopic={goTo} onClose={() => setPaletteOpen(false)} />
+      )}
+      {keysOpen && <KeysDialog onClose={() => setKeysOpen(false)} />}
     </div>
   );
 }

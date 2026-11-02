@@ -37,7 +37,10 @@ export interface Topic {
   image?: TopicImage;
   /** Canvas position of a root topic's centre. Ignored on non-roots. */
   pos?: Point;
-  /** Per-tree layout override for a root topic. */
+  /**
+   * Layout override for this topic's branch (or, on a root, its whole tree).
+   * Children inherit it until another topic overrides it again.
+   */
   layout?: LayoutKind;
   note?: string;
   markers?: string[];
@@ -84,7 +87,7 @@ export function createTopic(text: string, children: Topic[] = []): Topic {
   return { id: newId(), text, children };
 }
 
-export function createMap(title = 'Yeni harita'): MindMap {
+export function createMap(title = 'Yeni harita', mainLabel = 'Ana konu'): MindMap {
   return {
     format: 'keizu/1',
     id: newId('m'),
@@ -98,10 +101,10 @@ export function createMap(title = 'Yeni harita'): MindMap {
     relations: [],
     roots: [
       createTopic(title, [
-      createTopic('Ana konu 1'),
-      createTopic('Ana konu 2'),
-      createTopic('Ana konu 3'),
-      createTopic('Ana konu 4'),
+      createTopic(`${mainLabel} 1`),
+      createTopic(`${mainLabel} 2`),
+      createTopic(`${mainLabel} 3`),
+      createTopic(`${mainLabel} 4`),
       ]),
     ],
   };
@@ -282,7 +285,7 @@ export function moveTopic(map: MindMap, id: string, newParentId: string, index?:
   if (isDescendant(map, id, newParentId) || !findTopic(map, newParentId)) return map;
   const d = detach(map, id);
   if (!d) return map;
-  const node: Topic = { ...d.node, pos: undefined, layout: undefined };
+  const node: Topic = { ...d.node, pos: undefined };
   return mapTopic(d.map, newParentId, (p) => {
     const children = [...p.children];
     const at = index === undefined ? children.length : Math.max(0, Math.min(index, children.length));
@@ -308,6 +311,62 @@ export function toggleCollapse(map: MindMap, id: string): MindMap {
 
 export function setMapProps(map: MindMap, patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'title'>>): MindMap {
   return { ...map, ...patch, updatedAt: new Date().toISOString() };
+}
+
+/** Sets or clears (undefined) the layout of a topic's branch. */
+export function setBranchLayout(map: MindMap, id: string, layout: LayoutKind | undefined): MindMap {
+  return mapTopic(map, id, (t) => ({ ...t, layout }));
+}
+
+/** Parent (undefined for roots), sibling list and index of a topic. */
+export function siblingsOf(map: MindMap, id: string): { parent?: Topic; list: Topic[]; index: number } | undefined {
+  const i = map.roots.findIndex((r) => r.id === id);
+  if (i >= 0) return { list: map.roots, index: i };
+  const parent = findParent(map, id);
+  if (!parent) return undefined;
+  return { parent, list: parent.children, index: parent.children.findIndex((c) => c.id === id) };
+}
+
+/** Outliner "indent": becomes the last child of its previous sibling. */
+export function indentTopic(map: MindMap, id: string): MindMap {
+  const s = siblingsOf(map, id);
+  if (!s?.parent || s.index === 0) return map;
+  return moveTopic(map, id, s.list[s.index - 1].id);
+}
+
+/** Outliner "outdent": moves up a level, right after its old parent. */
+export function outdentTopic(map: MindMap, id: string): MindMap {
+  const s = siblingsOf(map, id);
+  if (!s?.parent) return map;
+  const up = siblingsOf(map, s.parent.id);
+  if (!up?.parent) return map; // the parent is a root: there is no level above
+  return moveTopic(map, id, up.parent.id, up.index + 1);
+}
+
+/** Moves a topic up (-1) or down (+1) among its siblings. */
+export function moveAmongSiblings(map: MindMap, id: string, delta: -1 | 1): MindMap {
+  const s = siblingsOf(map, id);
+  if (!s?.parent) return map;
+  const to = s.index + delta;
+  if (to < 0 || to >= s.list.length) return map;
+  // After detaching, the old slot closes up, so `to` is right either way.
+  return moveTopic(map, id, s.parent.id, to);
+}
+
+/** Expands every collapsed ancestor of a topic so it becomes visible. */
+export function revealTopic(map: MindMap, id: string): MindMap {
+  const path: Topic[] = [];
+  const walk = (t: Topic): boolean => {
+    if (t.id === id) return true;
+    path.push(t);
+    for (const c of t.children) if (walk(c)) return true;
+    path.pop();
+    return false;
+  };
+  if (!map.roots.some(walk)) return map;
+  let next = map;
+  for (const t of path) if (t.collapsed) next = updateTopic(next, t.id, { collapsed: false });
+  return next;
 }
 
 // ---------- images ----------
