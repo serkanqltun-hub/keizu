@@ -56,3 +56,6 @@ export const Check = (p: P) => <Svg {...p}><path d="M5 12.5l4.5 4.5L19 7.5" /></
 export const Keyboard = (p: P) => <Svg {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></Svg>;
 export const RelationIcon = (p: P) => <Svg {...p}><path d="M4 19C4 8 20 16 20 5" /><path d="M16.5 4.5L20 5l.5 3.5" /></Svg>;
 export const FloatingIcon = (p: P) => <Svg {...p}><rect x="3" y="4" width="9" height="6" rx="2" /><rect x="12" y="14" width="9" height="6" rx="2" strokeDasharray="2.5 2" /></Svg>;
+export const Save = (p: P) => <Svg {...p}><path d="M5 4h11l3 3v13H5z" /><path d="M8 4v5h7V4M8 20v-6h8v6" /></Svg>;
+export const ImageIcon = (p: P) => <Svg {...p}><rect x="3" y="5" width="18" height="14" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="M4 18l5-5 4 4 3-3 4 4" /></Svg>;
+export const History = (p: P) => <Svg {...p}><path d="M4 12a8 8 0 1 0 2.4-5.7L4 8.5" /><path d="M4 4v4.5h4.5M12 8v4.5l3 2" /></Svg>;

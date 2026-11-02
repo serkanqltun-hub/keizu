@@ -104,8 +104,11 @@ export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: T
   const strokeW = b.depth === 1 ? 2 : 1.25;
   const textX = b.padX + markers.length * (MARKER_SIZE + MARKER_GAP);
   const textBlockH = b.lines.length * b.lineHeight;
-  const firstBaseline = (b.h - textBlockH) / 2 + b.lineHeight / 2 + b.fontSize * 0.35;
-  const iconY = (b.h - MARKER_SIZE) / 2;
+  // Text and icons sit in the area below the picture, if there is one.
+  const bodyH = b.h - b.imageH;
+  const firstBaseline = b.imageH + (bodyH - textBlockH) / 2 + b.lineHeight / 2 + b.fontSize * 0.35;
+  const iconY = b.imageH + (bodyH - MARKER_SIZE) / 2;
+  const imgPad = b.image ? Math.min(b.padX, 8) : 0;
   const weight = /(\d{3})/.exec(b.font)?.[1] ?? '400';
 
   return (
@@ -115,6 +118,9 @@ export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: T
       )}
       <rect width={b.w} height={b.h} rx={rx} fill={fill} stroke={stroke} strokeWidth={stroke === 'none' ? 0 : strokeW} />
       {b.shape === 'underline' && <path d={`M0 ${b.h}H${b.w}`} stroke={b.color} strokeWidth={1.5} strokeLinecap="round" />}
+      {b.image && (
+        <image href={b.image.href} x={(b.w - b.image.w) / 2} y={imgPad} width={b.image.w} height={b.image.h - imgPad} preserveAspectRatio="xMidYMid meet" />
+      )}
       {markers.map((m, i) => (
         <MarkerGlyph key={m} id={m} x={b.padX + i * (MARKER_SIZE + MARKER_GAP)} y={iconY} />
       ))}

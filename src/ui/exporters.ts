@@ -1,12 +1,16 @@
-// Browser-side exports: SVG, PNG, Markdown and .keizu files.
+// Exports: SVG, PNG, PDF, Markdown, OPML and .keizu files. On the desktop
+// each one asks where to save; in the browser it downloads.
 
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { toJSON, toMarkdown } from '../core/io';
+import { encodeKeizu, encodePlainJson } from '../core/archive';
+import { toMarkdown, toOPML } from '../core/io';
+import { buildImagePdf } from '../core/pdf';
 import type { MapLayout } from '../core/layout';
 import type { MindMap } from '../core/model';
 import type { Theme } from '../core/themes';
 import { MapSvg } from './MapSvg';
+import { saveExport } from './platform';
 
 import latin400 from '@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-400-normal.woff2?url';
 import latin600 from '@fontsource/plus-jakarta-sans/files/plus-jakarta-sans-latin-600-normal.woff2?url';
@@ -19,18 +23,6 @@ const PAD = 40;
 
 export function safeFileName(title: string): string {
   return (title || 'harita').replace(/[\\/:*?"<>|\n]+/g, ' ').trim().slice(0, 80) || 'harita';
-}
-
-export function download(name: string, data: Blob | string, type = 'application/octet-stream') {
-  const blob = typeof data === 'string' ? new Blob([data], { type }) : data;
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function toDataUrl(url: string): Promise<string> {
@@ -81,12 +73,8 @@ export async function buildSvg(map: MindMap, layout: MapLayout, theme: Theme): P
   return { svg, width, height };
 }
 
-export async function exportSvg(map: MindMap, layout: MapLayout, theme: Theme) {
-  const { svg } = await buildSvg(map, layout, theme);
-  download(`${safeFileName(map.title)}.svg`, svg, 'image/svg+xml');
-}
-
-export async function exportPng(map: MindMap, layout: MapLayout, theme: Theme, scale = 2) {
+/** Draws the map onto a canvas at `scale`. */
+async function rasterize(map: MindMap, layout: MapLayout, theme: Theme, scale: number) {
   const { svg, width, height } = await buildSvg(map, layout, theme);
   const img = new Image();
   const url = URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
@@ -97,23 +85,70 @@ export async function exportPng(map: MindMap, layout: MapLayout, theme: Theme, s
       img.src = url;
     });
     const canvas = document.createElement('canvas');
-    canvas.width = width * scale;
-    canvas.height = height * scale;
+    canvas.width = Math.round(width * scale);
+    canvas.height = Math.round(height * scale);
     const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = theme.canvas;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
     ctx.scale(scale, scale);
     ctx.drawImage(img, 0, 0, width, height);
-    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'));
-    if (!blob) throw new Error('PNG oluşturulamadı.');
-    download(`${safeFileName(map.title)}.png`, blob);
+    return { canvas, width, height };
   } finally {
     URL.revokeObjectURL(url);
   }
 }
 
+const toBlob = (canvas: HTMLCanvasElement, type: string, quality?: number) =>
+  new Promise<Blob>((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Görsel oluşturulamadı.'))), type, quality));
+
+/** Exported picture size in px, before scaling (bounds plus padding). */
+const approxSize = (l: MapLayout): [number, number] => [l.bounds.maxX - l.bounds.minX + PAD * 2 + 24, l.bounds.maxY - l.bounds.minY + PAD * 2 + 24];
+
+/** Largest scale that keeps the canvas within browser limits. */
+function safeScale(width: number, height: number, wanted: number, maxSide = 12000, maxArea = 60e6): number {
+  return Math.max(0.25, Math.min(wanted, maxSide / Math.max(width, height), Math.sqrt(maxArea / (width * height))));
+}
+
+export async function exportSvg(map: MindMap, layout: MapLayout, theme: Theme) {
+  const { svg } = await buildSvg(map, layout, theme);
+  return saveExport(`${safeFileName(map.title)}.svg`, svg, 'image/svg+xml');
+}
+
+export async function exportPng(map: MindMap, layout: MapLayout, theme: Theme, scale = 2) {
+  const { canvas } = await rasterize(map, layout, theme, safeScale(...approxSize(layout), scale));
+  return saveExport(`${safeFileName(map.title)}.png`, await toBlob(canvas, 'image/png'), 'image/png');
+}
+
+/** PDF holding a high-resolution picture of the map, fitted to an A4 page. */
+export async function exportPdf(map: MindMap, layout: MapLayout, theme: Theme) {
+  const [w, h] = approxSize(layout);
+  // Aim for about 300 dpi on A4 (≈3500 px on the long side), more for big maps.
+  const scale = safeScale(w, h, Math.max(2, 3500 / Math.max(w, h)), 9000, 50e6);
+  const { canvas, width, height } = await rasterize(map, layout, theme, scale);
+  const jpeg = new Uint8Array(await (await toBlob(canvas, 'image/jpeg', 0.92)).arrayBuffer());
+  const pdf = buildImagePdf(jpeg, {
+    width: canvas.width,
+    height: canvas.height,
+    displayWidth: width * 0.75,
+    displayHeight: height * 0.75,
+    title: map.title,
+  });
+  return saveExport(`${safeFileName(map.title)}.pdf`, pdf, 'application/pdf');
+}
+
 export function exportMarkdown(map: MindMap) {
-  download(`${safeFileName(map.title)}.md`, toMarkdown(map), 'text/markdown');
+  return saveExport(`${safeFileName(map.title)}.md`, toMarkdown(map), 'text/markdown');
+}
+
+export function exportOpml(map: MindMap) {
+  return saveExport(`${safeFileName(map.title)}.opml`, toOPML(map), 'text/x-opml');
 }
 
 export function exportKeizu(map: MindMap) {
-  download(`${safeFileName(map.title)}.keizu`, toJSON(map), 'application/json');
+  return saveExport(`${safeFileName(map.title)}.keizu`, encodeKeizu(map), 'application/x-keizu');
+}
+
+/** Single readable JSON file with images inlined: diff-friendly for git. */
+export function exportPlainJson(map: MindMap) {
+  return saveExport(`${safeFileName(map.title)}.json`, encodePlainJson(map), 'application/json');
 }
