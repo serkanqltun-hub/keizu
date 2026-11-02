@@ -404,7 +404,6 @@ export const tr = {
   'home.sharedEdit': "{owner} · düzenleyebilirsin",
   'home.sharedView': "{owner} · görüntüleyebilirsin",
   'home.sharedGone': "Bu harita artık seninle paylaşılmıyor ya da silinmiş.",
-  'live.badge': "Canlı",
   'live.keptServer': "Bu cihazdaki değişiklikler sunucudakiyle birleştirilemedi; sunucudaki açıldı, bu cihazdaki sürüm geçmişinde.",
   'live.peers': "{n} kişi daha burada",
   'live.readOnly': "Bu haritayı yalnızca görüntüleyebilirsin.",

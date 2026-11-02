@@ -376,6 +376,29 @@ export function Home({ store, onOpen, onOpenShared, onSettings, onOpenFiles, not
           </section>
         )}
 
+        {!!sharedMaps?.length && (
+          <section>
+            <h2>{t('home.sharedWithMe')}</h2>
+            <div className="card-grid">
+              {sharedMaps
+                .filter((m) => !query.trim() || matchText(query, m.title))
+                .map((m) => (
+                  <div key={`${m.ownerId}:${m.id}`} className="card shared">
+                    <button className="card-open" onClick={() => onOpenShared(m)}>
+                      <span className="card-art" aria-hidden="true">
+                        <I.Users size={34} />
+                      </span>
+                      <span className="card-title">{m.title}</span>
+                      <span className="card-meta">
+                        {t(m.role === 'edit' ? 'home.sharedEdit' : 'home.sharedView', { owner: m.owner })} · {when(m.updatedAt)}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </section>
+        )}
+
         <section>
           <h2>{query.trim() ? t('home.titleMatches') : t('home.myMaps')}</h2>
           {maps === null ? null : shown.length === 0 ? (
@@ -407,28 +430,6 @@ export function Home({ store, onOpen, onOpenShared, onSettings, onOpenFiles, not
           )}
         </section>
 
-        {!!sharedMaps?.length && (
-          <section>
-            <h2>{t('home.sharedWithMe')}</h2>
-            <div className="card-grid">
-              {sharedMaps
-                .filter((m) => !query.trim() || matchText(query, m.title))
-                .map((m) => (
-                  <div key={`${m.ownerId}:${m.id}`} className="card shared">
-                    <button className="card-open" onClick={() => onOpenShared(m)}>
-                      <span className="card-art" aria-hidden="true">
-                        <I.Users size={34} />
-                      </span>
-                      <span className="card-title">{m.title}</span>
-                      <span className="card-meta">
-                        {t(m.role === 'edit' ? 'home.sharedEdit' : 'home.sharedView', { owner: m.owner })} · {when(m.updatedAt)}
-                      </span>
-                    </button>
-                  </div>
-                ))}
-            </div>
-          </section>
-        )}
       </main>
       {dragging && <div className="drop-hint" aria-hidden="true">{t('home.dropHint')}</div>}
     </div>

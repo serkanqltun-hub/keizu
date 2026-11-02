@@ -17,11 +17,11 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 
 ## Durum
 
-**Faz 4 / 6: İsteğe bağlı Keizu Server.** Kullanılabilir ama erken bir sürüm. Yol haritası aşağıda.
+**Faz 5 / 6: Ortak çalışma ve yeni şemalar.** Kullanılabilir ama erken bir sürüm. Yol haritası aşağıda.
 
 ## Özellikler (şu an)
 
-- Zihin haritası, mantık şeması ve organizasyon şeması yerleşimleri, otomatik düzen
+- Yedi şema türü, otomatik düzen: zihin haritası, mantık şeması, organizasyon şeması, **kavram haritası** (çizgilerin üstünde yazı), **zaman çizelgesi**, **balık kılçığı** (neden-sonuç) ve **matris** (tablo). Her biri başlangıç ekranından hazır içerikle açılır, istenirse yalnız bir dala da uygulanır
 - Tek merkeze bağlı değil: tuvalde istediğin kadar **serbest konu** (ayrı ağaç) ve konular arasında etiketli **ilişki okları**
 - Klavyeyle hızlı yazma: Tab alt konu, Enter kardeş konu, yazmaya başlayınca düzenleme
 - Sürükle-bırak ile konu taşıma; boş alana bırakınca serbest konu olur
@@ -43,6 +43,11 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 - **Değiştirilebilir kısayollar**: Klavye kısayolları penceresinden her komuta istediğin tuşu ata
 - **Türkçe ve İngilizce arayüz** (başlangıç ekranından veya komut paletinden değişir); yeni dil eklemek tek dosya
 - **İsteğe bağlı bulut senkronu** (Ayarlar → Bulut senkronu): kendi **Keizu Server**'ını ya da bir WebDAV klasörünü (Nextcloud vb.) bağla, haritaların cihazların arasında arka planda eşitlensin. İlk açılışta hiçbir şey sorulmaz; bağlamazsan Keizu tamamen yerel çalışır. Çevrimdışı düzenlemeler bağlantı gelince gönderilir, iki cihazın değişiklikleri konu konu birleştirilir, birleşemeyen durumda hiçbir şey kaybolmaz (çakışan kopya)
+- **Haritalar arası bağlantı**: bir konuyu başka bir haritaya (veya bir web adresine) bağla; konudaki simgeye tıklayınca ya da Alt+Enter ile açılır (Biçim paneli → Bağlantı)
+- **Sunum modu** (F5): harita tam ekran, konu konu; kamera her adımda o konuya ve alt konularına kayar, gerisi soluklaşır. Ok tuşları / boşluk ile ilerle, Esc ile çık
+- **Paylaşım ve canlı ortak çalışma** (Keizu Server 1.1+): haritayı sunucudaki bir hesapla "görüntüleyebilir" ya da "düzenleyebilir" olarak paylaş; paylaşılan kişi yalnız o haritayı görür. Aynı anda düzenleyenler birbirinin değişikliğini anında görür, kimin hangi konuda olduğu renkli çerçeveyle belli olur. Bağlantı koparsa düzenlemeler bekler ve geri gelince gönderilir; geri al yalnız senin değişikliklerini geri alır. Ücretsizdir, yalnız kendi sunucunla çalışır
+- **Salt okunur link**: hesabı olmayan biri linkle haritayı görüntüleyebilir (ve sunabilir); link istendiğinde iptal edilir
+- **İsteğe bağlı uçtan uca şifreleme** (Ayarlar → Bulut senkronu): haritalar cihazdan çıkmadan bir parolayla şifrelenir, sunucu içeriği göremez. Şifreli haritalar paylaşılamaz ve canlı düzenlenemez
 - **Büyük haritalar**: yalnız ekranda görünen konular çizilir, çok uzaktan bakınca sade çizime geçilir; 10.000+ konuluk harita akıcı kalır (performans testi: `src/ui/perf.test.tsx`)
 
 ## Klavye
@@ -57,6 +62,8 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 | Ctrl/⌘ + Enter | Seçili konuyu ortala |
 | Enter / Shift+Enter | Kardeş konu ekle (sonrasına / öncesine) |
 | F2, Boşluk veya yazmaya başla | Metni düzenle (Shift+Enter yeni satır) |
+| F5 | Sunum modu |
+| Alt + Enter | Konudaki bağlantıyı aç |
 | Delete | Konuyu veya seçili ilişkiyi sil |
 | Ok tuşları | Konular arasında gezin |
 | Ctrl/⌘ + / | Daralt / genişlet |
@@ -102,7 +109,7 @@ Sunucunun adresi Keizu'nun kendisini açar, bağlanma ekranında adres hazır ge
 
 ```
 src/core/     Veri modeli, yerleşim motoru, geri al, temalar, dosya formatları (tarayıcıdan bağımsız, testli)
-src/sync/     Depolama ve senkron: IndexedDB kitaplığı, sürüm geçmişi, dosya bağlantıları, senkron motoru, birleştirme, Keizu Server ve WebDAV adaptörleri
+src/sync/     Depolama ve senkron: IndexedDB kitaplığı, sürüm geçmişi, dosya bağlantıları, senkron motoru, birleştirme, Keizu Server ve WebDAV adaptörleri, canlı oturum, uçtan uca şifreleme
 src/ui/       React arayüzü: başlangıç ekranı, editör, tuval, ana hat, komut paleti, biçim paneli
 src/i18n/     Arayüz dilleri (tr.ts kaynak dil, en.ts; eksik çeviri derlemede hata verir)
 src-tauri/    Masaüstü kabuğu (Tauri 2)
@@ -111,6 +118,8 @@ docs/server/  Sunucu kurulum rehberi
 ```
 
 Bir harita bir graftır: birden çok kök konu (ilki ana konu, diğerleri tuvalde serbest) ve konular arası ilişkiler. Şema türü veri değil, görünüm ayarıdır.
+
+Canlı ortak çalışma `src/core/crdt.ts` üzerine kuruludur: her konu alanı, her ilişki ve harita ayarı "son yazan kazanır" kaydıdır (Lamport saati + yazar), konunun ağaçtaki yeri (üst konu + sıralama anahtarı) tek kayıttır. Değişiklikler hangi sırayla gelirse gelsin herkes aynı haritayı görür; aynı dosya sunucuda da çalışır.
 
 ## Dosya formatı
 
@@ -129,8 +138,8 @@ Düz JSON seçeneği aynı haritayı tek bir metin dosyasına yazar (görseller 
 1. Editör çekirdeği
 2. Dosyalar: `.keizu` zip formatı, masaüstünde gerçek dosyalar, `.xmind` / OPML içe aktarma, PDF, sürüm geçmişi
 3. Hız ve gezinme: ana hat görünümü, Ctrl+K komut paleti, tüm haritalarda arama, değiştirilebilir kısayollar, Türkçe + İngilizce arayüz, 10.000 konuda akıcılık, dal başına yerleşim
-4. **Keizu Server** (bu sürüm, isteğe bağlı): tek komutla kurulum, davetle hesaplar, QR / kodla bağlanma, senkron, sunucuda sürüm geçmişi ve yedek
-5. Ortak çalışma ve yeni şemalar: canlı ortak düzenleme, kavram haritası, zaman çizelgesi, balık kılçığı
+4. Keizu Server (isteğe bağlı): tek komutla kurulum, davetle hesaplar, QR / kodla bağlanma, senkron, sunucuda sürüm geçmişi ve yedek
+5. **Ortak çalışma ve yeni şemalar** (bu sürüm): kişi başına paylaşım, canlı ortak düzenleme (CRDT), salt okunur link, haritalar arası bağlantı, sunum modu, isteğe bağlı uçtan uca şifreleme; kavram haritası, zaman çizelgesi, balık kılçığı, matris
 6. Genişleme: eklentiler, mobil
 
 ## Lisans

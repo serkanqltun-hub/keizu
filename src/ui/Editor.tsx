@@ -555,11 +555,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           <div className="doc-title">
             <span className="name">{map.title}</span>
             {shared ? (
-              <span className={`status ${live.state === 'live' ? 'saved' : 'saving'}`}>
-                {t(readOnly ? 'live.sharedView' : 'live.sharedEdit', { owner: shared.owner })}
-                {' · '}
-                {t(`live.state.${live.state}`)}
-              </span>
+              <span className="status saving">{t(readOnly ? 'live.sharedView' : 'live.sharedEdit', { owner: shared.owner })}</span>
             ) : (
               link && fileState === 'needs-permission' ? (
               <button className="status warn" onClick={() => saveToFile()} title={t('file.permissionTip')}>
@@ -575,9 +571,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               </span>
             )
             )}
-            {!shared && live.state !== 'off' && (
+            {live.state !== 'off' && (
               <span className={`live-badge ${live.state}`} title={t(`live.state.${live.state}`)}>
-                <span className="dot" /> {t('live.badge')}
+                <span className="dot" /> {t(`live.state.${live.state}`)}
               </span>
             )}
           </div>
@@ -645,8 +641,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
             </div>
           )}
           {!shared && sync.canShare() && (
-            <button className="btn" title={cmdLabel('share')} onClick={() => setShareOpen(true)}>
-              <I.Share size={16} /> {t('share.button')}
+            <button className={`ib ${shareOpen ? 'on' : ''}`} aria-label={t('share.button')} title={tip('share', t('share.title'))} onClick={() => setShareOpen(true)}>
+              <I.Share />
             </button>
           )}
           {!shared && (

@@ -366,3 +366,5 @@ mark { background: color-mix(in srgb, #ffd43b 55%, transparent); color: inherit;
 .e2e-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .e2e-form { display: flex; flex-direction: column; gap: 8px; max-width: 360px; }
 .public-view.empty { height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--muted); }
+/* Narrower windows: toolbar buttons keep their icons and tooltips, not their labels. */
+@media (max-width: 1360px) { .tb-center .tb { min-width: 38px; font-size: 0; gap: 0; } }

@@ -38,6 +38,11 @@ export function ShareDialog({ map, onClose, onShared }: Props) {
   useEffect(() => {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
 
   const run = async (fn: () => Promise<ShareInfo>) => {
     setBusy(true);
@@ -74,7 +79,7 @@ export function ShareDialog({ map, onClose, onShared }: Props) {
 
   return (
     <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog share" role="dialog" aria-label={t('share.title')} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+      <div className="dialog share" role="dialog" aria-label={t('share.title')}>
         <div className="sc-head">
           <strong>{t('share.title')}</strong>
           <button className="ib" aria-label={t('common.close')} onClick={onClose}>×</button>

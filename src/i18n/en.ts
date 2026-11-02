@@ -405,7 +405,6 @@ export const en: Record<MessageKey, string> = {
   'home.sharedEdit': "{owner} · you can edit",
   'home.sharedView': "{owner} · view only",
   'home.sharedGone': "This map is no longer shared with you, or was deleted.",
-  'live.badge': "Live",
   'live.keptServer': "Changes on this device couldn't be merged with the server's; the server's copy is open and this device's is in version history.",
   'live.peers': "{n} more people here",
   'live.readOnly': "You can only view this map.",
