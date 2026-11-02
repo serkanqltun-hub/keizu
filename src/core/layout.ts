@@ -10,16 +10,24 @@ import { getTheme } from './themes';
 
 export type Measure = (text: string, font: string) => number;
 
+/**
+ * How a topic's children are arranged around it: to one side, to both
+ * sides (mind map), or below it (org chart).
+ */
+export type Flow = 'right' | 'left' | 'both' | 'down';
+
 export interface NodeBox {
   id: string;
   /** Root topic of the tree this box belongs to. */
   rootId: string;
-  /** Layout of that tree. */
+  /** Layout in effect at this topic: its own override, or inherited. */
   layout: LayoutKind;
+  /** How this topic's children are arranged. */
+  flow: Flow;
   topic: Topic;
   parentId?: string;
   depth: number;
-  /** +1 right of the root, -1 left, 0 the root itself (or org layout). */
+  /** +1 right of its parent, -1 left, 0 below it (or the root itself). */
   side: 1 | -1 | 0;
   x: number;
   y: number;
@@ -58,13 +66,13 @@ interface Metrics {
   shape: TopicShape;
 }
 
-function metricsFor(depth: number, kind: LayoutKind, t: Topic): Metrics {
+function metricsFor(depth: number, boxed: boolean, t: Topic): Metrics {
   const base: Metrics =
     depth === 0
       ? { fontSize: 20, weight: 700, padX: 24, padY: 16, minW: 120, shape: 'rounded' }
       : depth === 1
         ? { fontSize: 15, weight: 600, padX: 16, padY: 9, minW: 64, shape: 'rounded' }
-        : { fontSize: 14, weight: 400, padX: 6, padY: 5, minW: 24, shape: kind === 'org' ? 'rounded' : 'underline' };
+        : { fontSize: 14, weight: 400, padX: 6, padY: 5, minW: 24, shape: boxed ? 'rounded' : 'underline' };
   const s = t.style ?? {};
   return {
     ...base,
@@ -78,8 +86,8 @@ const IMAGE_MAX_W = 320;
 const IMAGE_MAX_H = 240;
 const IMAGE_GAP = 6;
 
-function sizeNode(t: Topic, depth: number, kind: LayoutKind, measure: Measure, resources?: Record<string, string>) {
-  const m = metricsFor(depth, kind, t);
+function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, resources?: Record<string, string>) {
+  const m = metricsFor(depth, boxed, t);
   const font = `${t.style?.italic ? 'italic ' : ''}${m.weight} ${m.fontSize}px ${FONT_FAMILY}`;
   const lines = (t.text || ' ').split('\n');
   const textW = Math.max(...lines.map((l) => measure(l || ' ', font)));
@@ -110,6 +118,7 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
   const mainKind = map.layout;
   const palette = (i: number) => (map.multicolor ? theme.palette[i % theme.palette.length] : theme.mono);
   let colorIndex = map.roots[0]?.children.length ?? 0;
+  let maxY = 0;
 
   map.roots.forEach((root, ri) => {
     const kind = root.layout ?? mainKind;
@@ -121,7 +130,6 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
     let pos = root.pos;
     if (!pos && ri > 0) {
       // No stored position: park it under everything laid out so far.
-      const maxY = nodes.reduce((m, b) => Math.max(m, b.y + b.h / 2), 0);
       pos = { x: 0, y: maxY + 80 + (tree.root.y - tree.minY) };
     }
     const dx = pos?.x ?? 0, dy = pos?.y ?? 0;
@@ -129,9 +137,9 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
       b.x += dx;
       b.y += dy;
       b.rootId = root.id;
-      b.layout = kind;
       nodes.push(b);
       byId.set(b.id, b);
+      maxY = Math.max(maxY, b.y + b.h / 2);
     }
   });
 
@@ -146,7 +154,19 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
   return { kind: mainKind, nodes, byId, bounds };
 }
 
-/** Lays out one tree with its root at (0, 0). */
+/** Extent of a laid-out subtree around its root's centre (all >= 0). */
+interface Ext {
+  l: number;
+  r: number;
+  t: number;
+  b: number;
+}
+
+/**
+ * Lays out one tree with its root at (0, 0). Any topic may override the
+ * layout for its own branch (Topic.layout); its children then follow that
+ * layout until another override.
+ */
 function layoutTree(
   root: Topic,
   kind: LayoutKind,
@@ -159,94 +179,103 @@ function layoutTree(
 ): { nodes: NodeBox[]; root: NodeBox; minY: number } {
   const nodes: NodeBox[] = [];
   const byId = new Map<string, NodeBox>();
+  /** Topics whose layout is set explicitly (the tree root counts). */
+  const explicit = new Set<string>([root.id]);
 
-  const build = (t: Topic, depth: number, color: string, parentId?: string) => {
-    const size = sizeNode(t, depth, kind, measure, resources);
+  const build = (t: Topic, depth: number, color: string, inherited: LayoutKind, parentDown: boolean, parentId?: string) => {
+    const own = t === root ? kind : t.layout ?? inherited;
+    if (t !== root && t.layout) explicit.add(t.id);
+    const size = sizeNode(t, depth, parentDown || own === 'org', measure, resources);
     const hidden = t.collapsed && t.children.length ? countTopics(t) - 1 : 0;
-    const box: NodeBox = { id: t.id, rootId: root.id, layout: kind, topic: t, parentId, depth, side: 0, x: 0, y: 0, color, hidden, ...size };
+    const box: NodeBox = { id: t.id, rootId: root.id, layout: own, flow: 'right', topic: t, parentId, depth, side: 0, x: 0, y: 0, color, hidden, ...size };
     nodes.push(box);
     byId.set(t.id, box);
     if (!hidden) {
-      t.children.forEach((c, i) => build(c, depth + 1, depth === 0 ? palette(i) : color, t.id));
+      t.children.forEach((c, i) => build(c, depth + 1, depth === 0 ? palette(i) : color, own, own === 'org', t.id));
     }
   };
-  build(root, baseDepth, baseDepth === 0 ? mono : rootColor);
+  build(root, baseDepth, baseDepth === 0 ? mono : rootColor, kind, false);
 
   const kids = (t: Topic) => (byId.get(t.id)!.hidden ? [] : t.children);
+  /** Offset of each topic's centre from its parent's centre. */
+  const off = new Map<string, Point>();
 
-  if (kind === 'org') {
-    const subW = new Map<string, number>();
-    const measureW = (t: Topic): number => {
-      const b = byId.get(t.id)!;
-      const cs = kids(t);
-      const sum = cs.reduce((s, c) => s + measureW(c), 0) + ORG_H_GAP * Math.max(0, cs.length - 1);
-      const w = Math.max(b.w, sum);
-      subW.set(t.id, w);
-      return w;
+  const flowOf = (b: NodeBox, side: -1 | 0 | 1): Flow => {
+    if (b.layout === 'org') return 'down';
+    if (b.layout === 'mindmap' && explicit.has(b.id)) return 'both';
+    return side < 0 ? 'left' : 'right';
+  };
+
+  /** Places the subtree of `t` (on `side` of its parent) and returns its extent. */
+  const arrange = (t: Topic, side: -1 | 0 | 1): Ext => {
+    const b = byId.get(t.id)!;
+    b.side = side;
+    b.flow = flowOf(b, side);
+    const e: Ext = { l: b.w / 2, r: b.w / 2, t: b.h / 2, b: b.h / 2 };
+    const cs = kids(t);
+    if (!cs.length) return e;
+    const grow = (c: Topic, ce: Ext, dx: number, dy: number) => {
+      off.set(c.id, { x: dx, y: dy });
+      e.l = Math.max(e.l, ce.l - dx);
+      e.r = Math.max(e.r, dx + ce.r);
+      e.t = Math.max(e.t, ce.t - dy);
+      e.b = Math.max(e.b, dy + ce.b);
     };
-    const place = (t: Topic, cx: number, cy: number) => {
-      const b = byId.get(t.id)!;
-      b.x = cx;
-      b.y = cy;
-      const cs = kids(t);
-      if (!cs.length) return;
-      const total = cs.reduce((s, c) => s + subW.get(c.id)!, 0) + ORG_H_GAP * (cs.length - 1);
-      let left = cx - total / 2;
-      const rowY = cy + b.h / 2 + ORG_V_GAP;
-      for (const c of cs) {
-        const w = subW.get(c.id)!;
-        const cb = byId.get(c.id)!;
-        place(c, left + w / 2, rowY + cb.h / 2);
-        left += w + ORG_H_GAP;
-      }
-    };
-    measureW(root);
-    place(root, 0, 0);
-  } else {
-    const subH = new Map<string, number>();
-    const measureH = (t: Topic): number => {
-      const b = byId.get(t.id)!;
-      const cs = kids(t);
-      const sum = cs.reduce((s, c) => s + measureH(c), 0) + V_GAP(b.depth) * Math.max(0, cs.length - 1);
-      const h = Math.max(b.h, sum);
-      subH.set(t.id, h);
-      return h;
-    };
-    const placeChildren = (parent: NodeBox, cs: Topic[], dir: 1 | -1) => {
-      const gapV = V_GAP(parent.depth);
-      const total = cs.reduce((s, c) => s + subH.get(c.id)!, 0) + gapV * Math.max(0, cs.length - 1);
-      let yTop = parent.y - total / 2;
-      for (const c of cs) {
-        const cb = byId.get(c.id)!;
-        const h = subH.get(c.id)!;
-        cb.side = dir;
-        cb.x = parent.x + dir * (parent.w / 2 + H_GAP(parent.depth) + cb.w / 2);
-        cb.y = yTop + h / 2;
-        placeChildren(cb, kids(c), dir);
-        yTop += h + gapV;
-      }
-    };
-    measureH(root);
-    const rootBox = byId.get(root.id)!;
-    const cs = kids(root);
-    if (kind === 'logic') {
-      placeChildren(rootBox, cs, 1);
-    } else {
-      // Fill the right side until it holds about half the height, then the
-      // left side, going clockwise (left side listed bottom to top).
-      const total = cs.reduce((s, c) => s + subH.get(c.id)!, 0);
-      const right: Topic[] = [];
-      let acc = 0;
-      for (const c of cs) {
-        if (right.length === 0 || (acc < total / 2 && right.length < Math.ceil(cs.length / 2))) {
-          right.push(c);
-          acc += subH.get(c.id)!;
-        } else break;
-      }
-      placeChildren(rootBox, right, 1);
-      placeChildren(rootBox, cs.slice(right.length).reverse(), -1);
+
+    if (b.flow === 'down') {
+      const exts = cs.map((c) => arrange(c, 0));
+      const total = exts.reduce((s, x) => s + x.l + x.r, 0) + ORG_H_GAP * (cs.length - 1);
+      let left = -total / 2;
+      cs.forEach((c, i) => {
+        const ce = exts[i];
+        grow(c, ce, left + ce.l, b.h / 2 + ORG_V_GAP + ce.t);
+        left += ce.l + ce.r + ORG_H_GAP;
+      });
+      return e;
     }
-  }
+
+    const stack = (group: Topic[], exts: Ext[], dir: 1 | -1) => {
+      const gapV = V_GAP(b.depth);
+      const total = exts.reduce((s, x) => s + x.t + x.b, 0) + gapV * Math.max(0, group.length - 1);
+      let yTop = -total / 2;
+      group.forEach((c, i) => {
+        const ce = exts[i];
+        const reach = b.w / 2 + H_GAP(b.depth);
+        grow(c, ce, dir > 0 ? reach + ce.l : -reach - ce.r, yTop + ce.t);
+        yTop += ce.t + ce.b + gapV;
+      });
+    };
+
+    if (b.flow !== 'both') {
+      const dir = b.flow === 'left' ? -1 : 1;
+      stack(cs, cs.map((c) => arrange(c, dir)), dir);
+      return e;
+    }
+    // Both sides: fill the right side until it holds about half the height,
+    // then the left side, going clockwise (left side listed bottom to top).
+    const exts = cs.map((c) => arrange(c, 1));
+    const hs = exts.map((x) => x.t + x.b);
+    const total = hs.reduce((s, h) => s + h, 0);
+    let n = 0, acc = 0;
+    while (n < cs.length && (n === 0 || (acc < total / 2 && n < Math.ceil(cs.length / 2)))) acc += hs[n++];
+    stack(cs.slice(0, n), exts.slice(0, n), 1);
+    const left = cs.slice(n).reverse();
+    stack(left, left.map((c) => arrange(c, -1)), -1);
+    return e;
+  };
+  arrange(root, 0);
+
+  // Turn parent-relative offsets into tree coordinates.
+  const place = (t: Topic, x: number, y: number) => {
+    const b = byId.get(t.id)!;
+    b.x = x;
+    b.y = y;
+    for (const c of kids(t)) {
+      const o = off.get(c.id)!;
+      place(c, x + o.x, y + o.y);
+    }
+  };
+  place(root, 0, 0);
   const minY = nodes.reduce((m, b) => Math.min(m, b.y - b.h / 2), 0);
   return { nodes, root: byId.get(root.id)!, minY };
 }
@@ -262,7 +291,7 @@ export const approxMeasure: Measure = (text, font) => {
 
 /** Where a connector leaves the parent and reaches the child. */
 export function edgePoints(p: NodeBox, c: NodeBox): { from: Point; to: Point } {
-  if (c.layout === 'org') {
+  if (p.flow === 'down') {
     return { from: { x: p.x, y: p.y + p.h / 2 }, to: { x: c.x, y: c.y - c.h / 2 } };
   }
   const dir = c.side || 1;
@@ -273,9 +302,10 @@ export function edgePoints(p: NodeBox, c: NodeBox): { from: Point; to: Point } {
   return { from, to };
 }
 
-export function edgePath(kind: LayoutKind, style: 'curve' | 'elbow' | 'straight', a: Point, b: Point): string {
+/** Connector path; `vertical` for children placed below their parent. */
+export function edgePath(vertical: boolean, style: 'curve' | 'elbow' | 'straight', a: Point, b: Point): string {
   if (style === 'straight') return `M${a.x} ${a.y}L${b.x} ${b.y}`;
-  if (kind === 'org') {
+  if (vertical) {
     const my = (a.y + b.y) / 2;
     if (style === 'elbow') return `M${a.x} ${a.y}V${my}H${b.x}V${b.y}`;
     return `M${a.x} ${a.y}C${a.x} ${my} ${b.x} ${my} ${b.x} ${b.y}`;

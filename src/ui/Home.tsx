@@ -1,22 +1,25 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createMap, type LayoutKind, type MindMap } from '../core/model';
+import { matchText, searchMap, type TopicHit } from '../core/search';
+import { LANGS, getLang, locale, setLang, t, type Lang } from '../i18n';
 import type { MapStore, MapSummary } from '../sync/types';
+import { Highlight } from './CommandPalette';
 import * as I from './Icons';
+import { comboFromEvent, formatCombo } from './keymap';
 import { fromFileList, isDesktop, pickFiles, type PickedFile } from './platform';
 
 interface Props {
   store: MapStore;
-  onOpen(map: MindMap): void;
+  onOpen(map: MindMap, focusId?: string): void;
   /** Imports files; resolves with an error message, if any. */
   onOpenFiles(files: PickedFile[]): Promise<string | null>;
   notice: string | null;
   onNoticeShown(): void;
 }
 
-const TEMPLATES: { layout: LayoutKind; name: string; svg: JSX.Element }[] = [
+const TEMPLATES: { layout: LayoutKind; svg: JSX.Element }[] = [
   {
     layout: 'mindmap',
-    name: 'Zihin haritası',
     svg: (
       <svg width="96" height="56" viewBox="0 0 96 56" fill="none" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
         <rect x="36" y="22" width="24" height="12" rx="4" fill="#1F2A37" />
@@ -27,7 +30,6 @@ const TEMPLATES: { layout: LayoutKind; name: string; svg: JSX.Element }[] = [
   },
   {
     layout: 'logic',
-    name: 'Mantık şeması',
     svg: (
       <svg width="96" height="56" viewBox="0 0 96 56" fill="none" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
         <rect x="10" y="22" width="24" height="12" rx="4" fill="#1F2A37" />
@@ -38,7 +40,6 @@ const TEMPLATES: { layout: LayoutKind; name: string; svg: JSX.Element }[] = [
   },
   {
     layout: 'org',
-    name: 'Organizasyon şeması',
     svg: (
       <svg width="96" height="56" viewBox="0 0 96 56" fill="none" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
         <rect x="36" y="6" width="24" height="12" rx="4" fill="#1F2A37" />
@@ -54,10 +55,55 @@ const TEMPLATES: { layout: LayoutKind; name: string; svg: JSX.Element }[] = [
 function when(iso: string): string {
   const d = new Date(iso);
   const diff = (Date.now() - d.getTime()) / 1000;
-  if (diff < 60) return 'az önce';
-  if (diff < 3600) return `${Math.floor(diff / 60)} dk önce`;
-  if (diff < 86400) return `bugün ${d.toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
-  return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+  if (diff < 60) return t('time.justNow');
+  if (diff < 3600) return t('time.minutesAgo', { n: Math.floor(diff / 60) });
+  if (diff < 86400) return t('time.today', { time: d.toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' }) });
+  return d.toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+interface MapHits {
+  summary: MapSummary;
+  hits: TopicHit[];
+  total: number;
+}
+
+/**
+ * Searches inside every map in the library (topic texts and notes). Maps
+ * are read from the device once and cached until they change.
+ */
+function useLibrarySearch(store: MapStore, maps: MapSummary[] | null, query: string): MapHits[] | null {
+  const cache = useRef(new Map<string, { updatedAt: string; map: MindMap }>());
+  const [results, setResults] = useState<MapHits[] | null>(null);
+  useEffect(() => {
+    const q = query.trim();
+    if (!maps || q.length < 2) {
+      setResults(null);
+      return;
+    }
+    let alive = true;
+    const timer = setTimeout(async () => {
+      const out: MapHits[] = [];
+      for (const summary of maps) {
+        let entry = cache.current.get(summary.id);
+        if (!entry || entry.updatedAt !== summary.updatedAt) {
+          const map = await store.get(summary.id).catch(() => undefined);
+          if (!alive) return;
+          if (!map) continue;
+          entry = { updatedAt: summary.updatedAt, map };
+          cache.current.set(summary.id, entry);
+        }
+        const hits = searchMap(entry.map, q, 200);
+        if (hits.length) out.push({ summary, hits: hits.slice(0, 5), total: hits.length });
+      }
+      out.sort((a, b) => b.hits[0].match.score - a.hits[0].match.score);
+      if (alive) setResults(out);
+    }, 150);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+  }, [store, maps, query]);
+  return results;
 }
 
 export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Props) {
@@ -65,6 +111,20 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
+  const searchBox = useRef<HTMLInputElement>(null);
+  const found = useLibrarySearch(store, maps, query);
+
+  // Ctrl+K / ⌘K jumps to the search box here, like the palette in a map.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (comboFromEvent(e) !== 'Mod+K') return;
+      e.preventDefault();
+      searchBox.current?.focus();
+      searchBox.current?.select();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     if (!notice) return;
@@ -78,7 +138,7 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = async (layout: LayoutKind) => {
-    const map = { ...createMap('Merkez konu'), layout };
+    const map = { ...createMap(t('topic.central'), t('topic.main')), layout };
     await store.save(map);
     onOpen(map);
   };
@@ -89,7 +149,7 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
   };
 
   const remove = async (s: MapSummary) => {
-    if (!window.confirm(`"${s.title}" silinsin mi? Bu işlem geri alınamaz.`)) return;
+    if (!window.confirm(t('home.confirmDelete', { title: s.title }))) return;
     await store.remove(s.id);
     refresh();
   };
@@ -100,7 +160,7 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
       const err = await onOpenFiles(files);
       if (err) setError(err);
     } catch (e) {
-      setError((e as Error).message || 'Dosya açılamadı.');
+      setError((e as Error).message || t('home.openFailed'));
     }
     refresh();
   };
@@ -109,11 +169,15 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
     try {
       await importFiles(await pickFiles());
     } catch (e) {
-      setError((e as Error).message || 'Dosya açılamadı.');
+      setError((e as Error).message || t('home.openFailed'));
     }
   };
 
-  const shown = (maps ?? []).filter((m) => m.title.toLocaleLowerCase('tr').includes(query.toLocaleLowerCase('tr')));
+  const shown = (maps ?? []).filter((m) => !query.trim() || matchText(query, m.title));
+  const openAt = async (id: string, topicId: string) => {
+    const map = await store.get(id);
+    if (map) onOpen(map, topicId);
+  };
 
   return (
     <div
@@ -138,49 +202,87 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
           <span>Keizu</span>
         </div>
         <button className="btn primary block" onClick={() => create('mindmap')}>
-          <I.Plus size={16} /> Yeni harita
+          <I.Plus size={16} /> {t('home.newMap')}
         </button>
-        <button className="btn block" onClick={openDialog} title=".keizu, .json, .xmind, .opml veya Markdown">
-          <I.Import size={16} /> Dosya aç
+        <button className="btn block" onClick={openDialog} title={t('home.openFileTip')}>
+          <I.Import size={16} /> {t('home.openFile')}
         </button>
-        <p className="side-hint">.keizu, .xmind, OPML ve Markdown açılır. Dosyayı pencereye sürükleyip bırakabilirsin.</p>
+        <p className="side-hint">{t('home.openHint')}</p>
         <div className="local-card">
-          <strong>Bu cihazda</strong>
-          <span>
-            {isDesktop
-              ? 'Haritaların bu bilgisayarda saklanır. Bir haritayı "Kaydet" ile dosya olarak tuttuğunda değişiklikler o dosyaya da yazılır.'
-              : 'Haritaların bu tarayıcıda saklanır, hesap veya sunucu gerekmez. Yedek ya da başka cihaz için "Bilgisayara kaydet" ile dosya olarak al.'}
-          </span>
-          <span className="muted">Her haritanın son sürümleri otomatik olarak saklanır (sürüm geçmişi).</span>
-          <span className="muted">Senkron ve ortak çalışma için kendi sunucunu bağlama seçeneği yakında.</span>
+          <strong>{t('home.onDevice')}</strong>
+          <span>{isDesktop ? t('home.onDeviceDesktop') : t('home.onDeviceWeb')}</span>
+          <span className="muted">{t('home.versionsNote')}</span>
+          <span className="muted">{t('home.serverSoon')}</span>
         </div>
+        <label className="lang-pick">
+          <span>{t('home.language')}</span>
+          <select value={getLang()} onChange={(e) => setLang(e.target.value as Lang)}>
+            {LANGS.map((l) => (
+              <option key={l.id} value={l.id}>{l.name}</option>
+            ))}
+          </select>
+        </label>
       </aside>
 
       <main className="home-main">
         <label className="search">
           <I.Search />
-          <span className="sr">Haritalarda ara</span>
-          <input type="search" placeholder="Haritalarda ara" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <span className="sr">{t('home.search')}</span>
+          <input ref={searchBox} type="search" placeholder={t('home.searchPlaceholder')} value={query} onChange={(e) => setQuery(e.target.value)} />
+          <kbd className="search-kbd">{formatCombo('Mod+K')}</kbd>
         </label>
 
         {error && <div className="error" role="alert">{error}</div>}
 
-        <section>
-          <h2>Yeni başla</h2>
-          <div className="tpl-grid">
-            {TEMPLATES.map((t) => (
-              <button key={t.layout} className="tpl" onClick={() => create(t.layout)}>
-                <span className="tpl-art">{t.svg}</span>
-                {t.name}
-              </button>
-            ))}
-          </div>
-        </section>
+        {found && (
+          <section className="found">
+            <h2>{t('home.inTopics')}</h2>
+            {found.length === 0 ? (
+              <p className="muted">{t('home.noTopicHits')}</p>
+            ) : (
+              found.map((f) => (
+                <div key={f.summary.id} className="found-map">
+                  <div className="found-title">
+                    <strong>{f.summary.title}</strong>
+                    <span className="muted">{t('home.hitCount', { n: f.total })}</span>
+                  </div>
+                  <ul>
+                    {f.hits.map((h) => (
+                      <li key={h.id}>
+                        <button onClick={() => openAt(f.summary.id, h.id)}>
+                          <span className="found-text">
+                            {h.field === 'text' ? <Highlight text={h.text.split('\n')[0]} match={h.match} /> : h.text.split('\n')[0]}
+                            {h.field === 'note' && <span className="pi-tag">{t('palette.inNote')}</span>}
+                          </span>
+                          {h.path.length > 0 && <span className="pi-path">{h.path.slice(-2).map((p) => p.split('\n')[0]).join(' › ')}</span>}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))
+            )}
+          </section>
+        )}
+
+        {!query.trim() && (
+          <section>
+            <h2>{t('home.start')}</h2>
+            <div className="tpl-grid">
+              {TEMPLATES.map((tp) => (
+                <button key={tp.layout} className="tpl" onClick={() => create(tp.layout)}>
+                  <span className="tpl-art">{tp.svg}</span>
+                  {t(`layout.${tp.layout}`)}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section>
-          <h2>Haritalarım</h2>
+          <h2>{query.trim() ? t('home.titleMatches') : t('home.myMaps')}</h2>
           {maps === null ? null : shown.length === 0 ? (
-            <p className="muted">{maps.length ? 'Aramayla eşleşen harita yok.' : 'Henüz harita yok. Yukarıdan bir tane oluştur ya da bir dosya aç.'}</p>
+            <p className="muted">{maps.length ? t('home.noTitleMatch') : t('home.empty')}</p>
           ) : (
             <div className="card-grid">
               {shown.map((m) => (
@@ -196,10 +298,10 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
                     <span className="card-title">{m.title}</span>
                     <span className="card-meta">
                       {when(m.updatedAt)}
-                      {m.fileName && <span className="card-file" title="Bu dosyaya da kaydediliyor"> · {m.fileName}</span>}
+                      {m.fileName && <span className="card-file" title={t('home.fileTip')}> · {m.fileName}</span>}
                     </span>
                   </button>
-                  <button className="ib card-del" aria-label={`${m.title} haritasını sil`} title="Sil" onClick={() => remove(m)}>
+                  <button className="ib card-del" aria-label={t('home.deleteMap', { title: m.title })} title={t('tb.delete')} onClick={() => remove(m)}>
                     <I.Trash size={16} />
                   </button>
                 </div>
@@ -208,7 +310,7 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
           )}
         </section>
       </main>
-      {dragging && <div className="drop-hint" aria-hidden="true">Açmak için bırak</div>}
+      {dragging && <div className="drop-hint" aria-hidden="true">{t('home.dropHint')}</div>}
     </div>
   );
 }
