@@ -5,6 +5,7 @@ import { matchText, searchMap, type TopicHit } from '../core/search';
 import { LANGS, getLang, locale, setLang, t, type Lang } from '../i18n';
 import type { MapStore, MapSummary } from '../sync/types';
 import { sync } from '../sync/controller';
+import { KeizuServerAdapter, type SharedMap } from '../sync/keizuServer';
 import { Highlight } from './CommandPalette';
 import { fmtWhen, statusText } from './SyncSettings';
 import * as I from './Icons';
@@ -14,6 +15,8 @@ import { fromFileList, isDesktop, pickFiles, type PickedFile } from './platform'
 interface Props {
   store: MapStore;
   onOpen(map: MindMap, focusId?: string): void;
+  /** Opens a map another account shared with this one (Keizu Server). */
+  onOpenShared(m: SharedMap): void;
   onSettings(): void;
   /** Imports files; resolves with an error message, if any. */
   onOpenFiles(files: PickedFile[]): Promise<string | null>;
@@ -171,7 +174,7 @@ function SyncPill({ onClick }: { onClick(): void }) {
   );
 }
 
-export function Home({ store, onOpen, onSettings, onOpenFiles, notice, onNoticeShown }: Props) {
+export function Home({ store, onOpen, onOpenShared, onSettings, onOpenFiles, notice, onNoticeShown }: Props) {
   const [maps, setMaps] = useState<MapSummary[] | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -198,6 +201,20 @@ export function Home({ store, onOpen, onSettings, onOpenFiles, notice, onNoticeS
   }, [notice, onNoticeShown]);
 
   const refresh = () => store.list().then(setMaps);
+  // Maps people shared with this account, when a Keizu Server is connected.
+  const [sharedMaps, setSharedMaps] = useState<SharedMap[] | null>(null);
+  useEffect(() => {
+    if (!sync.hasSharing()) return;
+    let alive = true;
+    sync.adapter().then(async (a) => {
+      if (!(a instanceof KeizuServerAdapter)) return;
+      const list = await a.sharedWithMe().catch(() => null);
+      if (alive) setSharedMaps(list);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
   useEffect(() => {
     refresh();
     return sync.onMapsChanged(() => refresh());
@@ -389,6 +406,29 @@ export function Home({ store, onOpen, onSettings, onOpenFiles, notice, onNoticeS
             </div>
           )}
         </section>
+
+        {!!sharedMaps?.length && (
+          <section>
+            <h2>{t('home.sharedWithMe')}</h2>
+            <div className="card-grid">
+              {sharedMaps
+                .filter((m) => !query.trim() || matchText(query, m.title))
+                .map((m) => (
+                  <div key={`${m.ownerId}:${m.id}`} className="card shared">
+                    <button className="card-open" onClick={() => onOpenShared(m)}>
+                      <span className="card-art" aria-hidden="true">
+                        <I.Users size={34} />
+                      </span>
+                      <span className="card-title">{m.title}</span>
+                      <span className="card-meta">
+                        {t(m.role === 'edit' ? 'home.sharedEdit' : 'home.sharedView', { owner: m.owner })} · {when(m.updatedAt)}
+                      </span>
+                    </button>
+                  </div>
+                ))}
+            </div>
+          </section>
+        )}
       </main>
       {dragging && <div className="drop-hint" aria-hidden="true">{t('home.dropHint')}</div>}
     </div>

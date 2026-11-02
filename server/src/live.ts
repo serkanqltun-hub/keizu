@@ -176,7 +176,11 @@ export class LiveHub {
         return;
       }
       if (!room) return;
-      if (msg.type === 'ops') this.onOps(room, client, msg.ops);
+      if (msg.type === 'ops') {
+        this.onOps(room, client, msg.ops);
+        // Lets the app forget edits the server has taken (or refused).
+        if (typeof msg.seq === 'number') send(client.ws, { type: 'ack', seq: msg.seq });
+      }
       else if (msg.type === 'sel') {
         client.peer.sel = typeof msg.id === 'string' ? msg.id.slice(0, 100) : null;
         this.broadcast(room, { type: 'sel', peer: client.peer.id, id: client.peer.sel }, client);

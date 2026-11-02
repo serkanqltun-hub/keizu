@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { initHistory, push, redo, undo, type History } from '../core/history';
+import { initHistory, push, redo, replace, undo, type History } from '../core/history';
 import { layoutMap, type MapLayout } from '../core/layout';
 import { outlineRows } from '../core/outline';
 import {
@@ -50,6 +50,9 @@ import { LANGS, getLang, setLang, t } from '../i18n';
 import { parseMapLink } from '../core/links';
 import { Presentation } from './Presentation';
 import { openExternal } from './platform';
+import { ShareDialog } from './ShareDialog';
+import { useLive, type SharedRef } from './useLive';
+import { sync } from '../sync/controller';
 
 type Dir = 'left' | 'right' | 'up' | 'down';
 
@@ -90,9 +93,11 @@ interface Props {
   onBack(): void;
   /** Opens another map of the library (a topic link to it). */
   onOpenMap(id: string, topicId?: string): void;
+  /** Set for a map another account shared with you: it lives on the server only. */
+  shared?: SharedRef;
 }
 
-export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap }: Props) {
+export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap, shared }: Props) {
   const [hist, setHist] = useState<History<MindMap>>(() => initHistory(focusId ? revealTopic(initial, focusId) : initial));
   const map = hist.present;
   const startId = focusId && findTopic(initial, focusId) ? focusId : initial.roots[0].id;
@@ -143,10 +148,44 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
     if (id) setSelectedRelId(null);
   }, []);
 
+  // Live collaboration (Keizu Server): maps that arrive from the session
+  // replace the editor's map without becoming an undo step.
+  const fromLive = useRef<MindMap | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
+  const live = useLive({
+    mapId: initial.id,
+    shared,
+    store,
+    current: () => latest.current,
+    showRemote: (m) => {
+      fromLive.current = m;
+      setHist((h) => replace(h, m));
+    },
+    toast: (msg) => setToast(msg),
+  });
+  const session = live.session;
+  const readOnly = live.role === 'view';
+  const readOnlyRef = useRef(readOnly);
+  readOnlyRef.current = readOnly;
+
   const commit = useCallback((next: MindMap, select?: string | null) => {
+    if (readOnlyRef.current) {
+      setToast(t('live.readOnly'));
+      return;
+    }
     setHist((h) => push(h, next));
     if (select !== undefined) setSelectedId(select);
   }, []);
+
+  // Every local change goes to the live session as it happens.
+  useEffect(() => {
+    if (!session || map === fromLive.current) return;
+    session.localChange(map);
+  }, [map, session]);
+
+  useEffect(() => {
+    session?.select(selectedId);
+  }, [session, selectedId]);
 
   // Load the file link, and keep a version-history snapshot of the map as it
   // was opened and as it is left.
@@ -157,12 +196,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
       setLink(l);
       if (!(await linkWritable(l))) setFileState('needs-permission');
     });
+    if (shared) return; // someone else's map: nothing is kept on this device
     store.addVersion(initial, 'open').catch(() => {});
     return () => {
       alive = false;
       store.addVersion(latest.current, 'close').catch(() => {});
     };
-  }, [store, initial]);
+  }, [store, initial, shared]);
 
   /** Writes the map to its linked file, if any. */
   const writeFile = useCallback(
@@ -181,7 +221,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
   // Autosave shortly after each change. Maps always live on this device
   // first (and in their linked file, if any); a server syncs from here later.
   useEffect(() => {
-    if (map === initial) return;
+    if (map === initial || shared) return;
     setSaved('saving');
     const timer = setTimeout(() => {
       const next = { ...map, version: map.version + 1 };
@@ -199,7 +239,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
       if (f.fileState !== 'needs-permission') writeFile(next, f.link, false);
     }, 400);
     return () => clearTimeout(timer);
-  }, [map, initial, store, writeFile]);
+  }, [map, initial, store, writeFile, shared]);
 
   /** "Save to computer": writes the linked file, or asks where to keep one. */
   const saveToFile = async (saveAs = false) => {
@@ -254,6 +294,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
   }, [layout, selectedId, mainId]);
 
   const startEdit = (id: string, seed: string | null = null) => {
+    if (readOnly) return;
     setSelectedId(id);
     setEditSeed(seed);
     setEditingId(id);
@@ -326,8 +367,17 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
       const r = removeTopic(map, selectedId);
       commit(r.map, r.nextId);
     },
-    undo: () => setHist((h) => undo(h)),
-    redo: () => setHist((h) => redo(h)),
+    // In a live session undo and redo touch only this person's own edits.
+    undo: () => {
+      if (!session) return setHist((h) => undo(h));
+      const m = session.undo();
+      if (m) setHist((h) => replace(h, (fromLive.current = { ...latest.current, ...m } as MindMap)));
+    },
+    redo: () => {
+      if (!session) return setHist((h) => redo(h));
+      const m = session.redo();
+      if (m) setHist((h) => replace(h, (fromLive.current = { ...latest.current, ...m } as MindMap)));
+    },
     collapse() {
       if (selectedId) commit(toggleCollapse(map, selectedId));
     },
@@ -386,8 +436,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
     addSiblingBefore: { run: () => actions.addSibling(true), enabled: !!selectedId },
     edit: { run: () => selectedId && startEdit(selectedId), enabled: !!selectedId },
     remove: { run: actions.remove, enabled: !!selectedRelId || (!!selectedId && selectedId !== mainId) },
-    undo: { run: actions.undo, enabled: hist.past.length > 0 },
-    redo: { run: actions.redo, enabled: hist.future.length > 0 },
+    undo: { run: actions.undo, enabled: session ? session.canUndo() : hist.past.length > 0 },
+    redo: { run: actions.redo, enabled: session ? session.canRedo() : hist.future.length > 0 },
     copy: { run: () => actions.copy(), enabled: !!selected },
     cut: { run: () => actions.copy(true), enabled: !!selected && selectedId !== mainId },
     paste: { run: actions.paste, enabled: !!selectedId && !!clipboard.current },
@@ -414,13 +464,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
     panel: { run: () => setPanelOpen((v) => !v) },
     present: { run: () => setPresenting(true) },
     openLink: { run: () => actions.openLink(), enabled: !!selected?.href },
-    share: { run: () => {}, enabled: false },
+    share: { run: () => setShareOpen(true), enabled: !shared && sync.canShare() },
   };
 
   // Keyboard shortcuts (inactive while typing in a field or a dialog is open).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editingId || keysOpen || presenting) return;
+      if (editingId || keysOpen || presenting || shareOpen) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       const combo = comboFromEvent(e);
@@ -504,7 +554,14 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
           <div className="logo-mark"><I.Logo size={28} /></div>
           <div className="doc-title">
             <span className="name">{map.title}</span>
-            {link && fileState === 'needs-permission' ? (
+            {shared ? (
+              <span className={`status ${live.state === 'live' ? 'saved' : 'saving'}`}>
+                {t(readOnly ? 'live.sharedView' : 'live.sharedEdit', { owner: shared.owner })}
+                {' · '}
+                {t(`live.state.${live.state}`)}
+              </span>
+            ) : (
+              link && fileState === 'needs-permission' ? (
               <button className="status warn" onClick={() => saveToFile()} title={t('file.permissionTip')}>
                 {t('file.permission', { name: link.name })}
               </button>
@@ -516,11 +573,17 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
               <span className={`status ${saved}`} title={link ? (link.kind === 'path' ? link.path : link.name) : undefined}>
                 {saved === 'saved' ? <><I.Check size={13} /> {link ? t('file.savedTo', { name: link.name }) : t('file.savedHere')}</> : t('file.saving')}
               </span>
+            )
+            )}
+            {!shared && live.state !== 'off' && (
+              <span className={`live-badge ${live.state}`} title={t(`live.state.${live.state}`)}>
+                <span className="dot" /> {t('live.badge')}
+              </span>
             )}
           </div>
           <div className="tb-group">
-            <button className="ib" aria-label={cmdLabel('undo')} title={tip('undo')} disabled={!hist.past.length} onClick={actions.undo}><I.Undo /></button>
-            <button className="ib" aria-label={cmdLabel('redo')} title={tip('redo')} disabled={!hist.future.length} onClick={actions.redo}><I.Redo /></button>
+            <button className="ib" aria-label={cmdLabel('undo')} title={tip('undo')} disabled={!commands.undo.enabled} onClick={actions.undo}><I.Undo /></button>
+            <button className="ib" aria-label={cmdLabel('redo')} title={tip('redo')} disabled={!commands.redo.enabled} onClick={actions.redo}><I.Redo /></button>
           </div>
           <div className="seg view-switch" role="group" aria-label={t('view.label')}>
             <button className={view === 'map' ? 'on' : ''} aria-pressed={view === 'map'} title={tip('toggleOutline', t('view.map'))} onClick={() => switchView('map')}>
@@ -533,6 +596,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
           <button className="ib" aria-label={cmdLabel('palette')} title={tip('palette')} onClick={() => setPaletteOpen(true)}><I.Command /></button>
         </div>
 
+        {readOnly ? (
+          <div className="tb-center readonly-note">{t('live.readOnlyBar')}</div>
+        ) : (
         <nav className="tb-center" aria-label={t('editor.insert')}>
           <button className="tb" title={tip('addSibling')} disabled={!selectedId} onClick={() => actions.addSibling()}><I.TopicIcon />{t('tb.topic')}</button>
           <button className="tb" title={tip('addChild')} disabled={!selectedId} onClick={actions.addChild}><I.SubtopicIcon />{t('tb.subtopic')}</button>
@@ -559,8 +625,31 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
           <button className="tb" title={tip('collapse')} disabled={!selected?.children.length || selectedId === mainId} onClick={actions.collapse}><I.Collapse />{t('tb.collapse')}</button>
           <button className="tb" title={tip('remove')} disabled={!selectedRelId && (!selectedId || selectedId === mainId)} onClick={actions.remove}><I.Trash />{t('tb.delete')}</button>
         </nav>
+        )}
 
         <div className="tb-right">
+          {live.peers.length > 0 && (
+            <div className="peers" aria-label={t('live.peers', { n: live.peers.length })}>
+              {live.peers.slice(0, 5).map((p) => (
+                <span
+                  key={p.id}
+                  className="avatar"
+                  style={{ background: p.color }}
+                  title={`${p.name}${p.role === 'view' ? ` (${t('share.role.view')})` : ''}`}
+                  onClick={() => p.sel && goTo(p.sel)}
+                >
+                  {p.name.slice(0, 1).toUpperCase()}
+                </span>
+              ))}
+              {live.peers.length > 5 && <span className="avatar more">+{live.peers.length - 5}</span>}
+            </div>
+          )}
+          {!shared && sync.canShare() && (
+            <button className="btn" title={cmdLabel('share')} onClick={() => setShareOpen(true)}>
+              <I.Share size={16} /> {t('share.button')}
+            </button>
+          )}
+          {!shared && (
           <button
             className={`btn ${link ? '' : 'primary'}`}
             title={link ? `${t('file.saveToTip', { name: link.name })} (${fmt(keymap.save[0] ?? 'Mod+S')})` : tip('save', t('file.saveTip'))}
@@ -568,6 +657,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
           >
             <I.Save size={16} /> {isDesktop ? t('file.save') : t('file.saveToComputer')}
           </button>
+          )}
           <div className="menu-wrap">
             <button className="btn" aria-haspopup="menu" aria-expanded={exportOpen} onClick={() => setExportOpen((v) => !v)}>
               <I.Export size={16} /> {t('export.menu')}
@@ -592,7 +682,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
             )}
           </div>
           <button className="ib" aria-label={cmdLabel('present')} title={tip('present')} onClick={() => setPresenting(true)}><I.Present /></button>
-          <button className={`ib ${historyOpen ? 'on' : ''}`} aria-label={cmdLabel('history')} aria-pressed={historyOpen} title={tip('history')} onClick={() => setHistoryOpen((v) => !v)}><I.History /></button>
+          {!shared && <button className={`ib ${historyOpen ? 'on' : ''}`} aria-label={cmdLabel('history')} aria-pressed={historyOpen} title={tip('history')} onClick={() => setHistoryOpen((v) => !v)}><I.History /></button>}
           <button className="ib" aria-label={cmdLabel('shortcuts')} title={tip('shortcuts')} onClick={() => setKeysOpen(true)}><I.Keyboard /></button>
           <button className={`ib ${panelOpen ? 'on' : ''}`} aria-label={cmdLabel('panel')} aria-pressed={panelOpen} title={tip('panel')} onClick={() => setPanelOpen((v) => !v)}><I.Panel /></button>
         </div>
@@ -640,6 +730,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
               onZoomChange={setZoom}
               onOpenLink={(id) => actions.openLink(id)}
+              readOnly={readOnly}
+              peers={live.peers.map((p) => ({ id: p.id, name: p.name, color: p.color, selectedId: p.sel }))}
             />
           ) : (
             <OutlineView
@@ -691,7 +783,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
           />
         )}
 
-        {panelOpen && !historyOpen && (
+        {panelOpen && !historyOpen && !readOnly && (
           <FormatPanel
             map={map}
             topic={selected}
@@ -718,6 +810,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap 
         <CommandPalette map={map} commands={paletteCommands} onPickTopic={goTo} onClose={() => setPaletteOpen(false)} />
       )}
       {keysOpen && <KeysDialog onClose={() => setKeysOpen(false)} />}
+      {shareOpen && <ShareDialog map={map} onClose={() => setShareOpen(false)} onShared={live.enable} />}
       {presenting && (
         <Presentation
           map={map}

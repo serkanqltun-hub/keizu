@@ -26,6 +26,8 @@ export interface SyncOptions {
   policy: ConflictPolicy;
   /** Maps open in the editor: they are only pushed, never overwritten. */
   busy?: ReadonlySet<string>;
+  /** Maps not touched at all this pass (open in a live session, which saves them itself). */
+  skip?: ReadonlySet<string>;
   /** Title for a conflicting copy. */
   copyTitle?: (title: string) => string;
   onEvent?: (e: SyncEvent) => void;
@@ -124,6 +126,7 @@ export async function syncOnce(store: LibraryStore, remote: SyncAdapter, opts: S
   const localIds = new Set(localList.map((m) => m.id));
 
   for (const summary of localList) {
+    if (opts.skip?.has(summary.id)) continue;
     await guard(summary, async () => {
       const local = await store.get(summary.id);
       if (!local) return;

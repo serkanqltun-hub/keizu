@@ -5,9 +5,12 @@
 import { t } from '../i18n';
 import { isDesktop } from '../ui/platform';
 import { syncOnce, type ConflictPolicy, type SyncEvent } from './engine';
-import { KeizuServerAdapter, type Fetch, type ServerInfo, type Session } from './keizuServer';
+import { KeizuServerAdapter, discover, liveUrl, type Fetch, type ServerInfo, type Session } from './keizuServer';
+import { contentHash } from '../core/versions';
+import type { MindMap } from '../core/model';
 import { AuthError, NetworkError, type LibraryStore, type SyncAdapter } from './types';
 import { WebDavAdapter } from './webdav';
+import { EncryptingAdapter, newSalt } from './e2e';
 
 export type SyncConfig =
   | {
@@ -19,6 +22,8 @@ export type SyncConfig =
       serverName: string;
       serverVersion: string;
       compat: ServerInfo['compat'];
+      /** Server abilities seen when connecting (sharing, live editing). */
+      features?: string[];
     }
   | { kind: 'webdav'; url: string; username: string; password: string };
 
@@ -39,6 +44,7 @@ const KEY_CONFIG = 'keizu:sync:config';
 const KEY_PREFS = 'keizu:sync:prefs';
 const KEY_ACTIVITY = 'keizu:sync:activity';
 const KEY_LAST = 'keizu:sync:last';
+const KEY_E2E = 'keizu:sync:e2e';
 const MAX_ACTIVITY = 40;
 const EVERY_MS = 60_000;
 const AFTER_EDIT_MS = 3_000;
@@ -96,11 +102,14 @@ class SyncController {
   private listeners = new Set<() => void>();
   private changeListeners = new Set<(ids: string[]) => void>();
   private busy = new Set<string>();
+  private live = new Set<string>();
   private timer: ReturnType<typeof setTimeout> | undefined;
   private interval: ReturnType<typeof setInterval> | undefined;
   private running: Promise<void> | null = null;
   private again = false;
   private fetcher: Fetch | null = null;
+  /** End-to-end encryption: the passphrase stays on this device. */
+  private e2e = load<{ on: boolean; passphrase: string; salt: string }>(KEY_E2E, { on: false, passphrase: '', salt: '' });
 
   /** Starts background sync for this library (only acts when connected). */
   attach(store: LibraryStore) {
@@ -111,6 +120,7 @@ class SyncController {
     }
     this.schedule();
     if (this.config && this.prefs.auto) this.syncNow();
+    this.refreshFeatures();
   }
 
   private onWake = () => {
@@ -169,6 +179,7 @@ class SyncController {
       serverName: info.name,
       serverVersion: info.version,
       compat: info.compat,
+      features: info.features,
     };
     this.connected();
   }
@@ -227,6 +238,75 @@ class SyncController {
     }
   }
 
+  /** A live session saves this map itself: keep the sync away from it meanwhile. */
+  setLive(id: string, on: boolean) {
+    if (on) this.live.add(id);
+    else {
+      this.live.delete(id);
+      this.nudge(500);
+    }
+  }
+
+  /** The live session saved the map as `rev`: remember it as synced. */
+  async recordSaved(map: MindMap, rev: string) {
+    await this.store?.putSync({ id: map.id, rev, hash: contentHash(map), base: map, syncedAt: new Date().toISOString() }).catch(() => {});
+  }
+
+  getEncryption = () => this.e2e.on;
+
+  /** Turns end-to-end encryption on (with a passphrase) or off. */
+  setEncryption(on: boolean, passphrase = '') {
+    if (on && passphrase.length < 8) throw new Error(t('e2e.tooShort'));
+    this.e2e = on ? { on, passphrase, salt: this.e2e.salt || newSalt() } : { on: false, passphrase: '', salt: '' };
+    store(KEY_E2E, this.e2e.on ? this.e2e : undefined);
+    this.emit();
+    // Everything goes up again, encrypted (or readable) this time: mark every
+    // synced map as changed so the next pass pushes it.
+    const st = this.store;
+    if (st) {
+      st.listSync()
+        .then((recs) => Promise.all(recs.map((r) => st.putSync({ ...r, hash: 'resend' }))))
+        .then(() => this.syncNow())
+        .catch(() => {});
+    }
+  }
+
+  /** Is the connected server one that can share maps? */
+  hasSharing(): boolean {
+    const c = this.config;
+    return c?.kind === 'keizu' && !!c.features?.includes('share');
+  }
+
+  /** Can this server share maps with other people? (Not while encrypting.) */
+  canShare(): boolean {
+    const c = this.config;
+    return c?.kind === 'keizu' && !!c.features?.includes('share') && !this.e2e.on;
+  }
+
+  /** Where live sessions connect, when the connected server supports them. */
+  liveTarget(own = true): { url: string; token: string; username: string } | undefined {
+    const c = this.config;
+    // Encrypted maps can't go live (the server can't read them); maps others shared still can.
+    if (c?.kind !== 'keizu' || !c.features?.includes('live') || (own && this.e2e.on)) return undefined;
+    return { url: liveUrl(c.api), token: c.token, username: c.username };
+  }
+
+  /** Refreshes what the server can do (after a server update), without signing in again. */
+  async refreshFeatures() {
+    const c = this.config;
+    if (c?.kind !== 'keizu') return;
+    try {
+      const info = await discover((this.fetcher ??= await httpFetch()), c.server);
+      if (JSON.stringify(info.features) !== JSON.stringify(c.features ?? [])) {
+        this.config = { ...c, features: info.features, serverVersion: info.version };
+        store(KEY_CONFIG, this.config);
+        this.emit();
+      }
+    } catch {
+      /* offline: keep what we know */
+    }
+  }
+
   /** A local change happened: sync a little later. */
   nudge(delay = AFTER_EDIT_MS) {
     if (!this.config || !this.prefs.auto || this.status.state === 'signedOut') return;
@@ -251,13 +331,15 @@ class SyncController {
   }
 
   private async run() {
-    const adapter = await this.adapter();
+    const plain = await this.adapter();
+    const adapter = plain && this.e2e.on && this.e2e.passphrase ? new EncryptingAdapter(plain, this.e2e.passphrase, this.e2e.salt) : plain;
     if (!adapter || !this.store) return;
     this.setStatus({ ...this.status, state: 'syncing', message: undefined });
     try {
       const { events, changed } = await syncOnce(this.store, adapter, {
         policy: this.prefs.policy,
         busy: this.busy,
+        skip: this.live,
         copyTitle: (title) => t('sync.copyTitle', { title }),
       });
       if (events.length) {
