@@ -3,11 +3,14 @@ import type { MindMap } from '../core/model';
 import { IdbStore } from '../sync/idbStore';
 import { LocalMapStore } from '../sync/localStore';
 import type { LibraryStore } from '../sync/types';
+import { sync, withSyncHooks } from '../sync/controller';
+import { parseConnectLink } from '../sync/keizuServer';
+import { SyncSettings } from './SyncSettings';
 import { Editor } from './Editor';
 import { Home } from './Home';
 import { importIntoLibrary } from './library';
 import { clearMeasureCache } from './measure';
-import { onOpenFiles, readPath, takeOpenedFiles, type PickedFile } from './platform';
+import { isDesktop, onOpenFiles, readPath, takeOpenedFiles, type PickedFile } from './platform';
 import { getLang, t, useLang } from '../i18n';
 
 export function App() {
@@ -23,10 +26,17 @@ export function App() {
   // Bumped once web fonts load, so the layout re-measures text.
   const [fontsReady, setFontsReady] = useState(0);
 
+  const [settings, setSettings] = useState(false);
+  const [connectLink, setConnectLink] = useState<{ server: string; code?: string } | null>(null);
+
   useEffect(() => {
     IdbStore.open()
       .catch((): LibraryStore => new LocalMapStore())
-      .then(setStore);
+      .then((raw) => {
+        // Sync works on the raw library; the UI's saves nudge it.
+        sync.attach(raw);
+        setStore(withSyncHooks(raw, () => sync.nudge()));
+      });
     // Ask the browser not to evict our storage when space runs low.
     navigator.storage?.persist?.().catch(() => {});
   }, []);
@@ -42,6 +52,43 @@ export function App() {
   useEffect(() => {
     document.title = open ? `${open.map.title} · Keizu` : 'Keizu';
   }, [open]);
+
+  // An open map is only pushed by sync, never replaced under the editor.
+  const openId = open?.map.id;
+  useEffect(() => {
+    if (!openId) return;
+    sync.setBusy(openId, true);
+    return () => sync.setBusy(openId, false);
+  }, [openId]);
+
+  // keizu://connect?server=…&code=… links (desktop), or the same query on
+  // the web app's address, open Settings with the server filled in.
+  useEffect(() => {
+    const handle = (urls: string[]) => {
+      const link = urls.map(parseConnectLink).find(Boolean);
+      if (!link) return;
+      setOpen(null);
+      setConnectLink(link);
+      setSettings(true);
+    };
+    if (!isDesktop) {
+      const q = new URLSearchParams(location.search);
+      if (q.has('connect') && q.get('server')) {
+        handle([location.href]);
+        history.replaceState(null, '', location.pathname);
+      }
+      return;
+    }
+    let off = () => {};
+    import('@tauri-apps/plugin-deep-link')
+      .then(async (dl) => {
+        const first = await dl.getCurrent();
+        if (first) handle(first);
+        off = await dl.onOpenUrl(handle);
+      })
+      .catch(() => {});
+    return () => off();
+  }, [setOpen]);
 
   /** Imports files and opens the first map. Returns an error message, if any. */
   const openFiles = useCallback(
@@ -76,9 +123,20 @@ export function App() {
   }, [store, openFiles]);
 
   if (!store) return null;
+  if (settings && !open) {
+    return (
+      <SyncSettings
+        link={connectLink}
+        onBack={() => {
+          setSettings(false);
+          setConnectLink(null);
+        }}
+      />
+    );
+  }
   return open ? (
     <Editor key={open.map.id} initial={open.map} focusId={open.focusId} store={store} fontsReady={fontsReady} onBack={() => setOpen(null)} />
   ) : (
-    <Home store={store} onOpen={setOpen} onOpenFiles={openFiles} notice={notice} onNoticeShown={() => setNotice(null)} />
+    <Home store={store} onOpen={setOpen} onSettings={() => setSettings(true)} onOpenFiles={openFiles} notice={notice} onNoticeShown={() => setNotice(null)} />
   );
 }

@@ -1,0 +1,44 @@
+# Keizu Server with Docker Compose. The install script writes this file to
+# /opt/keizu together with a .env; see docs/server/hetzner.md.
+#
+# Two ways to reach it from the internet:
+#   1. Standalone: COMPOSE_PROFILES=caddy in .env starts Caddy on ports 80/443,
+#      which gets a Let's Encrypt certificate for KEIZU_DOMAIN by itself.
+#   2. Behind a reverse proxy you already run (nginx, Caddy, Traefik…): leave
+#      COMPOSE_PROFILES empty and point the proxy at 127.0.0.1:KEIZU_PORT.
+# Keizu itself only ever listens on localhost.
+
+services:
+  keizu:
+    image: ${KEIZU_IMAGE:-ghcr.io/serkanqltun-hub/keizu-server:latest}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      KEIZU_DATA: /data
+      KEIZU_PORT: "8787"
+    volumes:
+      - ./data:/data
+    ports:
+      - "127.0.0.1:${KEIZU_PORT:-8787}:8787"
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["caddy"]
+    restart: unless-stopped
+    environment:
+      KEIZU_DOMAIN: ${KEIZU_DOMAIN:?KEIZU_DOMAIN .env içinde olmalı}
+      ACME_EMAIL: ${KEIZU_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - keizu
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -78,3 +78,5 @@ export const Chevron = (p: P) => <Svg {...p}><path d="M9 6l6 6-6 6" /></Svg>;
 export const OutlineIcon = (p: P) => <Svg {...p}><path d="M4 6h.01M8 6h12M8 12h.01M12 12h8M8 18h.01M12 18h8" /></Svg>;
 export const MapIcon = (p: P) => <Svg {...p}><rect x="9" y="10" width="6" height="4" rx="1.5" /><path d="M15 12c2 0 2-5 5-5M15 12c2 0 2 5 5 5M9 12c-2 0-2-5-5-5M9 12c-2 0-2 5-5 5" /></Svg>;
 export const Command = (p: P) => <Svg {...p}><path d="M9 6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3z" /></Svg>;
+export const Cloud = (p: P) => <Svg {...p}><path d="M7 18a4.5 4.5 0 0 1-.6-9 6 6 0 0 1 11.4 1.6A3.8 3.8 0 0 1 17.5 18z" /></Svg>;
+export const Back = (p: P) => <Svg {...p}><path d="M15 6l-6 6 6 6" /></Svg>;

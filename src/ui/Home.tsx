@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createMap, type LayoutKind, type MindMap } from '../core/model';
 import { matchText, searchMap, type TopicHit } from '../core/search';
 import { LANGS, getLang, locale, setLang, t, type Lang } from '../i18n';
 import type { MapStore, MapSummary } from '../sync/types';
+import { sync } from '../sync/controller';
 import { Highlight } from './CommandPalette';
+import { fmtWhen, statusText } from './SyncSettings';
 import * as I from './Icons';
 import { comboFromEvent, formatCombo } from './keymap';
 import { fromFileList, isDesktop, pickFiles, type PickedFile } from './platform';
@@ -11,6 +13,7 @@ import { fromFileList, isDesktop, pickFiles, type PickedFile } from './platform'
 interface Props {
   store: MapStore;
   onOpen(map: MindMap, focusId?: string): void;
+  onSettings(): void;
   /** Imports files; resolves with an error message, if any. */
   onOpenFiles(files: PickedFile[]): Promise<string | null>;
   notice: string | null;
@@ -106,7 +109,24 @@ function useLibrarySearch(store: MapStore, maps: MapSummary[] | null, query: str
   return results;
 }
 
-export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Props) {
+function SyncPill({ onClick }: { onClick(): void }) {
+  const status = useSyncExternalStore((f) => sync.subscribe(f), sync.getStatus);
+  const on = status.state !== 'off';
+  return (
+    <button className="sync-pill" onClick={onClick}>
+      <I.Cloud size={16} />
+      <span>
+        <strong>{t('home.sync')}</strong>
+        <span className="muted">
+          {on ? `${statusText(status)}${status.lastSyncAt && status.state === 'idle' ? ` · ${fmtWhen(status.lastSyncAt)}` : ''}` : t('home.syncOff')}
+        </span>
+      </span>
+      {on && <span className={`dot ${status.state === 'idle' || status.state === 'syncing' ? 'ok' : 'warn'}`} />}
+    </button>
+  );
+}
+
+export function Home({ store, onOpen, onSettings, onOpenFiles, notice, onNoticeShown }: Props) {
   const [maps, setMaps] = useState<MapSummary[] | null>(null);
   const [query, setQuery] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -135,6 +155,7 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
   const refresh = () => store.list().then(setMaps);
   useEffect(() => {
     refresh();
+    return sync.onMapsChanged(() => refresh());
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const create = async (layout: LayoutKind) => {
@@ -212,8 +233,8 @@ export function Home({ store, onOpen, onOpenFiles, notice, onNoticeShown }: Prop
           <strong>{t('home.onDevice')}</strong>
           <span>{isDesktop ? t('home.onDeviceDesktop') : t('home.onDeviceWeb')}</span>
           <span className="muted">{t('home.versionsNote')}</span>
-          <span className="muted">{t('home.serverSoon')}</span>
         </div>
+        <SyncPill onClick={onSettings} />
         <label className="lang-pick">
           <span>{t('home.language')}</span>
           <select value={getLang()} onChange={(e) => setLang(e.target.value as Lang)}>

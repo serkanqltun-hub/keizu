@@ -21,7 +21,7 @@ export interface MapStore {
 }
 
 /** Why a snapshot was taken. */
-export type VersionReason = 'auto' | 'open' | 'close' | 'restore';
+export type VersionReason = 'auto' | 'open' | 'close' | 'restore' | 'sync';
 
 export interface VersionInfo {
   id: number;
@@ -57,25 +57,65 @@ export interface LinkStore {
   findByPath(path: string): Promise<string | undefined>;
 }
 
-/** Everything the app keeps on this device. */
-export type LibraryStore = MapStore & VersionStore & LinkStore;
+/**
+ * What this device remembers about a map it has synced: the server's
+ * revision, a fingerprint of the content as last synced, and that content
+ * itself (the common ancestor for a three-way merge).
+ */
+export interface SyncRecord {
+  id: string;
+  rev: string;
+  hash: string;
+  base: MindMap;
+  syncedAt: string;
+}
 
-/** Thrown by a remote when the server holds a newer version. */
+export interface SyncStateStore {
+  listSync(): Promise<SyncRecord[]>;
+  putSync(record: SyncRecord): Promise<void>;
+  deleteSync(id: string): Promise<void>;
+  clearSync(): Promise<void>;
+}
+
+/** Everything the app keeps on this device. */
+export type LibraryStore = MapStore & VersionStore & LinkStore & SyncStateStore;
+
+/** A map as a remote lists it. `rev` is opaque: a version number or an ETag. */
+export interface RemoteSummary {
+  id: string;
+  title: string;
+  rev: string;
+  updatedAt?: string;
+}
+
+export interface RemoteMap {
+  map: MindMap;
+  rev: string;
+}
+
+/** Thrown by a remote when it holds a different revision than the one the push started from. */
 export class ConflictError extends Error {
-  constructor(public remote: MindMap) {
+  constructor(public remote: RemoteMap) {
     super('Sunucuda daha yeni bir sürüm var.');
   }
 }
 
+/** Thrown when the server refuses the request because of who we are (signed out, revoked). */
+export class AuthError extends Error {}
+
+/** Thrown when the remote can't be reached at all (offline, DNS, TLS, CORS). */
+export class NetworkError extends Error {}
+
 /**
- * A remote sync target. Implemented later by the Keizu Server and WebDAV
- * adapters; `push` must reject with ConflictError when `baseVersion` is
- * older than what the server holds.
+ * A remote sync target: Keizu Server or a WebDAV folder. `push` with a null
+ * base creates the map and must reject with ConflictError when it already
+ * exists; with a base it must reject when the remote has moved on.
  */
 export interface SyncAdapter {
   readonly kind: 'keizu' | 'webdav';
-  list(): Promise<MapSummary[]>;
-  pull(id: string): Promise<MindMap>;
-  push(map: MindMap, baseVersion: number): Promise<{ version: number }>;
+  list(): Promise<RemoteSummary[]>;
+  /** Undefined when the map is not (or no longer) on the remote. */
+  pull(id: string): Promise<RemoteMap | undefined>;
+  push(map: MindMap, baseRev: string | null): Promise<{ rev: string }>;
   remove(id: string): Promise<void>;
 }

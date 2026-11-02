@@ -259,3 +259,74 @@ mark { background: color-mix(in srgb, #ffd43b 55%, transparent); color: inherit;
 .found-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .doc-title { min-width: 96px; }
 .doc-title .status { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- phase 4: settings and sync ---------- */
+.dot { width: 8px; height: 8px; border-radius: 4px; background: var(--muted); flex: none; }
+.dot.ok { background: var(--ok); }
+.dot.warn { background: #d9822b; }
+.dot-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.sync-pill { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); text-align: left; font-size: 12px; line-height: 1.4; color: var(--ink-2); }
+.sync-pill:hover { border-color: #b9c0f0; }
+.sync-pill > span:not(.dot) { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.sync-pill strong { font-size: 13px; color: var(--ink); }
+.settings { min-height: 100%; display: flex; flex-wrap: wrap; }
+.settings-side { flex: 1 1 248px; max-width: 100%; padding: 20px 16px; background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 20px; }
+.back-link { display: inline-flex; align-items: center; gap: 8px; padding: 0 8px; border: 0; background: none; font-size: 13px; font-weight: 500; color: var(--ink-2); align-self: flex-start; }
+.settings-title { padding: 0 12px; font-size: 20px; font-weight: 700; }
+.settings-side nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-item { display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-radius: 8px; font-size: 14px; font-weight: 500; color: var(--ink-2); }
+.nav-item.on { background: var(--soft); color: var(--ink); font-weight: 600; }
+.settings-main { flex: 999 1 560px; min-width: 0; max-width: 1040px; padding: 40px; display: flex; flex-direction: column; gap: 24px; }
+.settings-main h1 { margin: 0 0 6px; font-size: 24px; }
+.settings-main h2 { margin: 0 0 12px; font-size: 16px; }
+.settings-main .muted { color: var(--muted); }
+.settings-main > div > p { margin: 0; font-size: 14px; line-height: 1.5; }
+.set-cols { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.set-col-main { flex: 2 1 380px; min-width: 0; }
+.set-col-side { flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+.set-card { display: flex; flex-direction: column; gap: 16px; padding: 24px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.set-card.side { gap: 12px; padding: 20px; font-size: 14px; }
+.set-card.side a { font-size: 13px; font-weight: 600; color: var(--accent); }
+.set-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.set-head strong { font-size: 16px; overflow-wrap: anywhere; }
+.seg-tabs { display: flex; padding: 3px; border-radius: 10px; background: var(--soft); }
+.seg-tabs button { flex: 1; height: 34px; border: 0; border-radius: 8px; background: transparent; font-size: 13px; font-weight: 500; color: var(--muted); }
+.seg-tabs button.on { background: var(--surface); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.08); }
+.fld-label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
+.fld-label .small { font-weight: 400; }
+.fld-row { display: flex; gap: 8px; }
+.fld-row .fld { flex: 1; min-width: 0; }
+.fld-row .btn { height: 40px; }
+.fld-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+.fld { width: 100%; height: 40px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); font-size: 14px; color: var(--ink); padding: 0 12px; }
+.fld:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.code-input { font-size: 20px; font-weight: 700; letter-spacing: 0.12em; max-width: 220px; }
+.found-box { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 10px; background: #eaf5ec; color: #1f6b33; font-size: 13px; }
+.found-box > span { display: flex; flex-direction: column; gap: 2px; }
+.found-box.warn { background: #fdf3e7; color: #8a4b0b; }
+@media (prefers-color-scheme: dark) {
+  .found-box { background: #1c3324; color: #9fe0b0; }
+  .found-box.warn { background: #3a2a17; color: #f4c58d; }
+  .error { background: #3d1f1f; color: #ffb4b4; }
+}
+.set-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.set-actions .btn { height: 40px; padding: 0 18px; font-size: 14px; }
+.set-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; }
+.set-row > span { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.set-row input[type='checkbox'] { width: 20px; height: 20px; accent-color: var(--accent); }
+.set-row select.fld { width: 320px; max-width: 100%; }
+.set-sep { height: 1px; background: var(--soft); }
+.copy-field { display: flex; gap: 6px; align-items: stretch; }
+.copy-field code { flex: 1; min-width: 0; padding: 10px; border-radius: 8px; background: #1f2a37; color: #e6e9ee; font: 500 12px ui-monospace, monospace; overflow-x: auto; white-space: nowrap; }
+.copy-field .btn { height: auto; }
+.pair-row { display: flex; gap: 14px; align-items: center; }
+.pair-qr { flex: none; border: 1px solid var(--line); border-radius: 8px; padding: 4px; background: #fff; }
+.pair-text { display: flex; flex-direction: column; gap: 6px; }
+.pair-code { font-size: 20px; font-weight: 700; letter-spacing: 0.12em; }
+.set-table { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.set-table table { width: 100%; border-collapse: collapse; }
+.set-table td, .set-table th { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--soft); font-size: 13px; }
+.set-table th { font-weight: 600; color: var(--muted); font-size: 12px; }
+.set-table td.warn { color: #b54708; }
+.set-table td.bad { color: #c92a2a; }
+@media (max-width: 640px) { .settings-main { padding: 24px 16px; } }

@@ -1,0 +1,11 @@
+# Context for server/Dockerfile (built from the repository root).
+**/node_modules
+dist
+.git
+.github
+src-tauri
+docs
+coverage
+server/data
+server/test
+**/*.db
