@@ -6,7 +6,10 @@
 // relations, which are labelled links between any two topics. How a tree is
 // drawn (mind map, logic chart, org chart) is a view setting, not data.
 
-export type LayoutKind = 'mindmap' | 'logic' | 'org';
+export type LayoutKind = 'mindmap' | 'logic' | 'org' | 'concept' | 'timeline' | 'fishbone' | 'matrix';
+
+/** Every layout, in the order the app offers them. */
+export const LAYOUT_KINDS: LayoutKind[] = ['mindmap', 'logic', 'org', 'concept', 'timeline', 'fishbone', 'matrix'];
 export type TopicShape = 'rounded' | 'pill' | 'rect' | 'underline' | 'none';
 export type BranchStyle = 'curve' | 'elbow' | 'straight';
 
@@ -43,6 +46,13 @@ export interface Topic {
    */
   layout?: LayoutKind;
   note?: string;
+  /** Words on the connector from the parent to this topic (concept maps). */
+  linkLabel?: string;
+  /**
+   * A link to open from this topic: another Keizu map ("keizu:map/<id>",
+   * optionally "#<topicId>") or a web address.
+   */
+  href?: string;
   markers?: string[];
   collapsed?: boolean;
   style?: TopicStyle;

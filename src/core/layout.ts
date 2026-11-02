@@ -12,9 +12,14 @@ export type Measure = (text: string, font: string) => number;
 
 /**
  * How a topic's children are arranged around it: to one side, to both
- * sides (mind map), or below it (org chart).
+ * sides (mind map), below it (org chart, concept map), as an indented list
+ * going down or up (inside timelines, fishbones and matrices), along a time
+ * axis, as the bones of a fishbone, or as the columns of a matrix.
  */
-export type Flow = 'right' | 'left' | 'both' | 'down';
+export type Flow = 'right' | 'left' | 'both' | 'down' | 'tree' | 'treeUp' | 'timeline' | 'fishbone' | 'matrix' | 'matrixCol';
+
+/** Flows whose children hang below (or above) the parent rather than beside it. */
+export const isVerticalFlow = (f: Flow) => f === 'down';
 
 export interface NodeBox {
   id: string;
@@ -42,6 +47,8 @@ export interface NodeBox {
   padX: number;
   /** Children hidden by collapsing, 0 when expanded. */
   hidden: number;
+  /** No connector is drawn from the parent (matrix cells). */
+  noEdge?: boolean;
   /** Topic picture drawn above the text, if any. */
   image?: { href: string; w: number; h: number };
   /** Vertical space the picture takes at the top of the box (0 without one). */
@@ -92,7 +99,7 @@ function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, res
   const lines = (t.text || ' ').split('\n');
   const textW = Math.max(...lines.map((l) => measure(l || ' ', font)));
   const lineHeight = Math.round(m.fontSize * 1.35);
-  const icons = (t.markers?.length ?? 0) + (t.note ? 1 : 0);
+  const icons = (t.markers?.length ?? 0) + (t.note ? 1 : 0) + (t.href ? 1 : 0);
   const iconW = icons * (MARKER_SIZE + MARKER_GAP);
   const href = t.image && resources?.[t.image.res];
   let image: NodeBox['image'];
@@ -110,6 +117,19 @@ const H_GAP = (depth: number) => (depth === 0 ? 64 : 40);
 const V_GAP = (depth: number) => (depth <= 1 ? 20 : 8);
 const ORG_H_GAP = 24;
 const ORG_V_GAP = 48;
+/** Concept maps leave room for words on the connectors. */
+const CONCEPT_V_GAP = 76;
+const CONCEPT_H_GAP = 36;
+const TREE_INDENT = 22;
+const TREE_GAP = 8;
+const TIMELINE_GAP = 36;
+const FISH_SPINE_GAP = 34;
+const FISH_GAP = 28;
+/** Fishbone bones lean this far (in x) over their height. */
+export const FISH_SLANT = 0.45;
+
+/** Layouts that draw every topic in a box (no underline-only topics). */
+const BOXED: LayoutKind[] = ['org', 'concept', 'timeline', 'fishbone', 'matrix'];
 
 export function layoutMap(map: MindMap, measure: Measure): MapLayout {
   const theme = getTheme(map.theme);
@@ -185,13 +205,13 @@ function layoutTree(
   const build = (t: Topic, depth: number, color: string, inherited: LayoutKind, parentDown: boolean, parentId?: string) => {
     const own = t === root ? kind : t.layout ?? inherited;
     if (t !== root && t.layout) explicit.add(t.id);
-    const size = sizeNode(t, depth, parentDown || own === 'org', measure, resources);
+    const size = sizeNode(t, depth, parentDown || BOXED.includes(own), measure, resources);
     const hidden = t.collapsed && t.children.length ? countTopics(t) - 1 : 0;
     const box: NodeBox = { id: t.id, rootId: root.id, layout: own, flow: 'right', topic: t, parentId, depth, side: 0, x: 0, y: 0, color, hidden, ...size };
     nodes.push(box);
     byId.set(t.id, box);
     if (!hidden) {
-      t.children.forEach((c, i) => build(c, depth + 1, depth === 0 ? palette(i) : color, own, own === 'org', t.id));
+      t.children.forEach((c, i) => build(c, depth + 1, depth === 0 ? palette(i) : color, own, BOXED.includes(own), t.id));
     }
   };
   build(root, baseDepth, baseDepth === 0 ? mono : rootColor, kind, false);
@@ -200,17 +220,32 @@ function layoutTree(
   /** Offset of each topic's centre from its parent's centre. */
   const off = new Map<string, Point>();
 
-  const flowOf = (b: NodeBox, side: -1 | 0 | 1): Flow => {
-    if (b.layout === 'org') return 'down';
-    if (b.layout === 'mindmap' && explicit.has(b.id)) return 'both';
+  const flowOf = (b: NodeBox, side: -1 | 0 | 1, given?: Flow): Flow => {
+    // Inside a timeline, fishbone or matrix the parent decides, unless this
+    // topic picks a layout of its own.
+    if (given && !explicit.has(b.id)) return given;
+    switch (b.layout) {
+      case 'org':
+      case 'concept':
+        return 'down';
+      case 'timeline':
+        return explicit.has(b.id) ? 'timeline' : 'tree';
+      case 'fishbone':
+        return explicit.has(b.id) ? 'fishbone' : 'tree';
+      case 'matrix':
+        return explicit.has(b.id) ? 'matrix' : 'tree';
+      case 'mindmap':
+        if (explicit.has(b.id)) return 'both';
+    }
     return side < 0 ? 'left' : 'right';
   };
 
   /** Places the subtree of `t` (on `side` of its parent) and returns its extent. */
-  const arrange = (t: Topic, side: -1 | 0 | 1): Ext => {
+  const arrange = (t: Topic, side: -1 | 0 | 1, given?: Flow): Ext => {
     const b = byId.get(t.id)!;
     b.side = side;
-    b.flow = flowOf(b, side);
+    b.flow = flowOf(b, side, given);
+    b.noEdge = given === 'matrixCol' || given === 'matrix' ? true : undefined;
     const e: Ext = { l: b.w / 2, r: b.w / 2, t: b.h / 2, b: b.h / 2 };
     const cs = kids(t);
     if (!cs.length) return e;
@@ -223,13 +258,109 @@ function layoutTree(
     };
 
     if (b.flow === 'down') {
+      const concept = b.layout === 'concept';
+      const hGap = concept ? CONCEPT_H_GAP : ORG_H_GAP;
       const exts = cs.map((c) => arrange(c, 0));
-      const total = exts.reduce((s, x) => s + x.l + x.r, 0) + ORG_H_GAP * (cs.length - 1);
+      const total = exts.reduce((s, x) => s + x.l + x.r, 0) + hGap * (cs.length - 1);
       let left = -total / 2;
       cs.forEach((c, i) => {
         const ce = exts[i];
-        grow(c, ce, left + ce.l, b.h / 2 + ORG_V_GAP + ce.t);
-        left += ce.l + ce.r + ORG_H_GAP;
+        grow(c, ce, left + ce.l, b.h / 2 + (concept ? CONCEPT_V_GAP : ORG_V_GAP) + ce.t);
+        left += ce.l + ce.r + hGap;
+      });
+      return e;
+    }
+
+    if (b.flow === 'tree' || b.flow === 'treeUp' || b.flow === 'matrixCol') {
+      // An indented list below (or above) the topic, like an outline.
+      const up = b.flow === 'treeUp';
+      const childFlow = up ? 'treeUp' : 'tree';
+      let cursor = up ? -b.h / 2 - TREE_GAP : b.h / 2 + TREE_GAP;
+      for (const c of cs) {
+        const ce = arrange(c, 1, childFlow);
+        const dx = b.flow === 'matrixCol' ? 0 : -b.w / 2 + TREE_INDENT + ce.l;
+        grow(c, ce, dx, up ? cursor - ce.b : cursor + ce.t);
+        cursor += up ? -(ce.t + ce.b + TREE_GAP) : ce.t + ce.b + TREE_GAP;
+      }
+      return e;
+    }
+
+    if (b.flow === 'timeline') {
+      // Events along a horizontal axis; their details alternate above and below.
+      let cursor = b.w / 2 + TIMELINE_GAP;
+      cs.forEach((c, i) => {
+        const ce = arrange(c, 1, i % 2 ? 'treeUp' : 'tree');
+        grow(c, ce, cursor + ce.l, 0);
+        cursor += ce.l + ce.r + TIMELINE_GAP;
+      });
+      return e;
+    }
+
+    if (b.flow === 'fishbone') {
+      // The topic is the head; the spine runs left from it. Bones alternate
+      // above and below the spine, causes listed along each bone.
+      let cursor = -b.w / 2 - FISH_GAP;
+      for (let i = 0; i < cs.length; i += 2) {
+        const pair = cs.slice(i, i + 2).map((c, k) => ({ c, top: k === 0, ce: arrange(c, -1, k === 0 ? 'tree' : 'treeUp') }));
+        let width = 0;
+        for (const { c, top, ce } of pair) {
+          const dy = top ? -FISH_SPINE_GAP - ce.b : FISH_SPINE_GAP + ce.t;
+          // The bone meets the spine to the right of the label: keep it clear of the bone before.
+          const lean = Math.abs(dy) * FISH_SLANT;
+          const right = cursor - lean;
+          grow(c, ce, right - ce.r, dy);
+          width = Math.max(width, ce.l + ce.r + lean);
+        }
+        cursor -= width + FISH_GAP;
+      }
+      return e;
+    }
+
+    if (b.flow === 'matrix') {
+      // Children are column headers; their children are the cells below.
+      const cols = cs.map((h) => {
+        const hb = byId.get(h.id)!;
+        const cells = kids(h);
+        const first = cells.map((c) => arrange(c, 0, 'tree'));
+        const w = Math.max(hb.w, ...first.map((x) => x.l + x.r));
+        return { h, hb, cells, w };
+      });
+      const headH = Math.max(b.h, ...cols.map((c) => c.hb.h));
+      b.h = headH;
+      e.t = e.b = headH / 2;
+      const rows: number[] = [];
+      const cellExt = cols.map((col) =>
+        col.cells.map((c, r) => {
+          byId.get(c.id)!.w = col.w;
+          const ce = arrange(c, 0, 'tree');
+          rows[r] = Math.max(rows[r] ?? 0, ce.t + ce.b);
+          return ce;
+        }),
+      );
+      let x = b.w / 2;
+      cols.forEach((col, ci) => {
+        col.hb.w = col.w;
+        col.hb.h = headH;
+        col.hb.flow = 'matrixCol';
+        col.hb.side = 1;
+        col.hb.noEdge = true;
+        if (!col.h.style?.shape) col.hb.shape = 'rect';
+        let y = headH / 2;
+        const ce: Ext = { l: col.w / 2, r: col.w / 2, t: headH / 2, b: headH / 2 };
+        col.cells.forEach((c, r) => {
+          const cb = byId.get(c.id)!;
+          cb.noEdge = true;
+          if (!c.style?.shape) cb.shape = 'rect';
+          if (!kids(c).length) cb.h = rows[r];
+          const x2 = cellExt[ci][r];
+          const dy = y + (kids(c).length ? x2.t : rows[r] / 2);
+          off.set(c.id, { x: 0, y: dy });
+          ce.b = Math.max(ce.b, y + rows[r]);
+          ce.r = Math.max(ce.r, x2.r);
+          y += rows[r];
+        });
+        grow(col.h, ce, x + col.w / 2, 0);
+        x += col.w;
       });
       return e;
     }
@@ -291,8 +422,20 @@ export const approxMeasure: Measure = (text, font) => {
 
 /** Where a connector leaves the parent and reaches the child. */
 export function edgePoints(p: NodeBox, c: NodeBox): { from: Point; to: Point } {
-  if (p.flow === 'down') {
-    return { from: { x: p.x, y: p.y + p.h / 2 }, to: { x: c.x, y: c.y - c.h / 2 } };
+  switch (p.flow) {
+    case 'down':
+      return { from: { x: p.x, y: p.y + p.h / 2 }, to: { x: c.x, y: c.y - c.h / 2 } };
+    case 'tree':
+      return { from: { x: p.x - p.w / 2 + TREE_INDENT / 2, y: p.y + p.h / 2 }, to: { x: c.x - c.w / 2, y: c.y } };
+    case 'treeUp':
+      return { from: { x: p.x - p.w / 2 + TREE_INDENT / 2, y: p.y - p.h / 2 }, to: { x: c.x - c.w / 2, y: c.y } };
+    case 'timeline':
+      return { from: { x: p.x + p.w / 2, y: p.y }, to: { x: c.x - c.w / 2, y: c.y } };
+    case 'fishbone': {
+      const top = c.y < p.y;
+      const to = { x: c.x + c.w / 2, y: top ? c.y + c.h / 2 : c.y - c.h / 2 };
+      return { from: { x: to.x + Math.abs(p.y - to.y) * FISH_SLANT, y: p.y }, to };
+    }
   }
   const dir = c.side || 1;
   const underlineP = p.depth >= 2 && p.shape === 'underline';
@@ -313,6 +456,28 @@ export function edgePath(vertical: boolean, style: 'curve' | 'elbow' | 'straight
   const mx = (a.x + b.x) / 2;
   if (style === 'elbow') return `M${a.x} ${a.y}H${mx}V${b.y}H${b.x}`;
   return `M${a.x} ${a.y}C${mx} ${a.y} ${mx} ${b.y} ${b.x} ${b.y}`;
+}
+
+/**
+ * The connector from parent `p` to child `c` (empty for matrix cells), and
+ * the point where words on it (Topic.linkLabel) go.
+ */
+export function edgeShape(p: NodeBox, c: NodeBox, style: 'curve' | 'elbow' | 'straight'): { d: string; mid: Point } {
+  if (c.noEdge) return { d: '', mid: { x: c.x, y: c.y } };
+  const { from, to } = edgePoints(p, c);
+  const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+  switch (p.flow) {
+    case 'tree':
+    case 'treeUp':
+      return { d: `M${from.x} ${from.y}V${to.y}H${to.x}`, mid };
+    case 'timeline':
+      return { d: `M${from.x} ${from.y}H${to.x}`, mid };
+    case 'fishbone':
+      // The spine from the head to this bone, then the bone itself.
+      return { d: `M${p.x - p.w / 2} ${p.y}H${from.x}L${to.x} ${to.y}`, mid: { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 } };
+  }
+  const st = p.layout === 'concept' && p.flow === 'down' ? 'straight' : style;
+  return { d: edgePath(p.flow === 'down', st, from, to), mid };
 }
 
 /** Point where the ray from the box centre towards `to` leaves the box. */

@@ -93,6 +93,7 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
             // Installed builds register keizu:// at install time; this covers
             // development runs and AppImage on Linux, and Windows.

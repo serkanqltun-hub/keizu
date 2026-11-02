@@ -35,6 +35,9 @@ export function mapMarker(id: string): string | undefined {
 
 function layoutFrom(structure?: string): LayoutKind {
   if (!structure) return 'mindmap';
+  if (structure.includes('fishbone')) return 'fishbone';
+  if (structure.includes('timeline')) return 'timeline';
+  if (structure.includes('spreadsheet') || structure.includes('matrix')) return 'matrix';
   if (structure.includes('org-chart') || structure.includes('tree')) return 'org';
   if (structure.includes('logic')) return 'logic';
   return 'mindmap';

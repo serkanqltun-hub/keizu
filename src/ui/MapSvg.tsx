@@ -1,7 +1,7 @@
 // Pure rendering of a laid-out map. Used both by the live canvas and by the
 // SVG/PNG exporters, so what you export is exactly what you see.
 
-import { edgePath, edgePoints, relationPath, type MapLayout, type NodeBox } from '../core/layout';
+import { edgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
 import { FLAG_COLORS, MARKER_GAP, MARKER_SIZE, PRIORITY_COLORS } from '../core/markers';
 import type { MindMap } from '../core/model';
 import { tint, type Theme } from '../core/themes';
@@ -96,6 +96,21 @@ function NoteGlyph({ x, y, color }: { x: number; y: number; color: string }) {
   );
 }
 
+function LinkGlyph({ x, y, color, internal }: { x: number; y: number; color: string; internal: boolean }) {
+  return (
+    <g fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" opacity={0.8} data-link-glyph="">
+      {internal ? (
+        <>
+          <rect x={x + 2} y={y + 5} width={9} height={9} rx={2} />
+          <path d={`M${x + 8} ${y + 2}h7v7M${x + 15} ${y + 2}l-6 6`} />
+        </>
+      ) : (
+        <path d={`M${x + 8} ${y + 11}l3-3a3 3 0 0 0-4-4l-1.5 1.5M${x + 10} ${y + 7}l-3 3a3 3 0 0 0 4 4l1.5-1.5M${x + 7} ${y + 12}l4-4`} />
+      )}
+    </g>
+  );
+}
+
 export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: Theme; selected?: boolean; dimmed?: boolean }) {
   const { fill, text } = nodeColors(b, theme);
   const s = b.topic.style ?? {};
@@ -141,6 +156,14 @@ export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: T
         ))}
       </text>
       {b.topic.note && <NoteGlyph x={b.w - b.padX - MARKER_SIZE} y={iconY} color={text} />}
+      {b.topic.href && (
+        <LinkGlyph
+          x={b.w - b.padX - MARKER_SIZE * (b.topic.note ? 2 : 1) - (b.topic.note ? MARKER_GAP : 0)}
+          y={iconY}
+          color={text}
+          internal={b.topic.href.startsWith('keizu:')}
+        />
+      )}
     </g>
   );
 }
@@ -148,8 +171,9 @@ export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: T
 export function CollapseBadge({ b, theme }: { b: NodeBox; theme: Theme }) {
   if (!b.hidden) return null;
   const down = b.flow === 'down';
-  const cx = down ? b.x : b.x + (b.flow === 'left' ? -1 : 1) * (b.w / 2 + 12);
-  const cy = down ? b.y + b.h / 2 + 12 : b.shape === 'underline' ? b.y + b.h / 2 : b.y;
+  const tree = b.flow === 'tree' || b.flow === 'treeUp' || b.flow === 'matrixCol';
+  const cx = down ? b.x : tree ? b.x - b.w / 2 + 12 : b.x + (b.flow === 'left' ? -1 : 1) * (b.w / 2 + 12);
+  const cy = down || (tree && b.flow !== 'treeUp') ? b.y + b.h / 2 + 12 : b.flow === 'treeUp' ? b.y - b.h / 2 - 12 : b.shape === 'underline' ? b.y + b.h / 2 : b.y;
   const label = b.hidden > 99 ? '99+' : String(b.hidden);
   return (
     <g data-collapse-id={b.id} style={{ cursor: 'pointer' }}>
@@ -199,6 +223,30 @@ function Relations({ map, layout, theme, selectedRelId }: { map: MindMap; layout
   );
 }
 
+/** Words on connectors (Topic.linkLabel), as in concept maps. */
+function LinkLabels({ map, layout, edges, theme }: { map: MindMap; layout: MapLayout; edges: NodeBox[]; theme: Theme }) {
+  const labelled = edges.filter((c) => c.topic.linkLabel && !c.noEdge);
+  if (!labelled.length) return null;
+  return (
+    <g>
+      {labelled.map((c) => {
+        const p = layout.byId.get(c.parentId!)!;
+        const { mid } = edgeShape(p, c, map.branchStyle);
+        const label = c.topic.linkLabel!;
+        const w = label.length * 6.4 + 12;
+        return (
+          <g key={`l-${c.id}`}>
+            <rect x={mid.x - w / 2} y={mid.y - 10} width={w} height={20} rx={5} fill={theme.canvas} opacity={0.92} />
+            <text x={mid.x} y={mid.y + 4} textAnchor="middle" fontSize={11} fontStyle="italic" fill={c.color} fontFamily={FONT}>
+              {label}
+            </text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 interface MapSvgProps {
   map: MindMap;
   layout: MapLayout;
@@ -219,19 +267,13 @@ export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, 
     <g>
       <g fill="none" strokeLinecap="round">
         {vis.edges.map((c) => {
+          if (c.noEdge) return null;
           const p = layout.byId.get(c.parentId!)!;
-          const { from, to } = edgePoints(p, c);
-          return (
-            <path
-              key={c.id}
-              d={edgePath(p.flow === 'down', map.branchStyle, from, to)}
-              stroke={c.color}
-              strokeWidth={c.depth === 1 ? 2.5 : 1.5}
-              opacity={dimIds?.has(c.id) ? 0.35 : 1}
-            />
-          );
+          const { d } = edgeShape(p, c, map.branchStyle);
+          return <path key={c.id} d={d} stroke={c.color} strokeWidth={c.depth === 1 || p.flow === 'fishbone' ? 2.5 : 1.5} opacity={dimIds?.has(c.id) ? 0.35 : 1} />;
         })}
       </g>
+      <LinkLabels map={map} layout={layout} edges={vis.edges} theme={theme} />
       {vis.nodes.map((b) => (
         <TopicView key={b.id} b={b} theme={theme} selected={b.id === selectedId} dimmed={dimIds?.has(b.id)} />
       ))}
@@ -251,10 +293,10 @@ export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, 
 function SimpleMap({ map, layout, theme, nodes, edges, selectedId }: { map: MindMap; layout: MapLayout; theme: Theme; nodes: NodeBox[]; edges: NodeBox[]; selectedId?: string }) {
   const edgeD = new Map<string, string[]>();
   for (const c of edges) {
+    if (c.noEdge) continue;
     const p = layout.byId.get(c.parentId!)!;
-    const { from, to } = edgePoints(p, c);
     const list = edgeD.get(c.color) ?? [];
-    list.push(edgePath(p.flow === 'down', map.branchStyle, from, to));
+    list.push(edgeShape(p, c, map.branchStyle).d);
     edgeD.set(c.color, list);
   }
   const fillD = new Map<string, string[]>();

@@ -330,3 +330,12 @@ mark { background: color-mix(in srgb, #ffd43b 55%, transparent); color: inherit;
 .set-table td.warn { color: #b54708; }
 .set-table td.bad { color: #c92a2a; }
 @media (max-width: 640px) { .settings-main { padding: 24px 16px; } }
+
+/* ---------- presentation ---------- */
+.present { position: fixed; inset: 0; z-index: 100; outline: none; cursor: pointer; }
+.present svg { display: block; }
+.present-bar { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 12px; background: rgba(31, 42, 55, 0.88); color: #fff; font-size: 13px; opacity: 0.25; transition: opacity 0.2s; cursor: default; }
+.present-bar:hover, .present:focus-visible .present-bar { opacity: 1; }
+.present-bar .ib { color: #fff; font-size: 18px; }
+.present-bar .ib:disabled { opacity: 0.35; }
+.present-bar .sep { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.3); }

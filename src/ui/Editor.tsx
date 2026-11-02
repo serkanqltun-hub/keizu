@@ -47,6 +47,9 @@ import { CommandPalette, type PaletteCommand } from './CommandPalette';
 import { KeysDialog, cmdLabel, fmt } from './KeysDialog';
 import { COMMANDS, commandFor, comboFromEvent, useKeymap, type CommandId } from './keymap';
 import { LANGS, getLang, setLang, t } from '../i18n';
+import { parseMapLink } from '../core/links';
+import { Presentation } from './Presentation';
+import { openExternal } from './platform';
 
 type Dir = 'left' | 'right' | 'up' | 'down';
 
@@ -85,9 +88,11 @@ interface Props {
   /** Topic to select (and reveal) when the map opens, e.g. from a search. */
   focusId?: string;
   onBack(): void;
+  /** Opens another map of the library (a topic link to it). */
+  onOpenMap(id: string, topicId?: string): void;
 }
 
-export function Editor({ initial, store, fontsReady, focusId, onBack }: Props) {
+export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap }: Props) {
   const [hist, setHist] = useState<History<MindMap>>(() => initHistory(focusId ? revealTopic(initial, focusId) : initial));
   const map = hist.present;
   const startId = focusId && findTopic(initial, focusId) ? focusId : initial.roots[0].id;
@@ -105,6 +110,12 @@ export function Editor({ initial, store, fontsReady, focusId, onBack }: Props) {
   const [keysOpen, setKeysOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [presenting, setPresenting] = useState(false);
+  // Other maps, for linking a topic to one.
+  const [libraryMaps, setLibraryMaps] = useState<{ id: string; title: string }[]>([]);
+  useEffect(() => {
+    store.list().then((l) => setLibraryMaps(l.map((m) => ({ id: m.id, title: m.title })))).catch(() => {});
+  }, [store]);
   // The file on disk this map is mirrored to, and whether the last write worked.
   const [link, setLink] = useState<FileLink | undefined>();
   const [fileState, setFileState] = useState<'ok' | 'needs-permission' | 'error'>('ok');
@@ -348,6 +359,15 @@ export function Editor({ initial, store, fontsReady, focusId, onBack }: Props) {
       setPanelTab('style');
       setTimeout(() => document.getElementById('note-field')?.focus(), 0);
     },
+    async openLink(id = selectedId) {
+      const tp = id ? findTopic(map, id) : undefined;
+      if (!tp?.href) return;
+      const ml = parseMapLink(tp.href);
+      if (!ml) return void openExternal(tp.href).catch(() => setToast(t('toast.linkFailed')));
+      if (ml.mapId === map.id) return goTo(ml.topicId ?? mainId);
+      if (!(await store.get(ml.mapId))) return setToast(t('toast.linkMissing'));
+      onOpenMap(ml.mapId, ml.topicId);
+    },
     move(id: string | null, fn: (m: MindMap, id: string) => MindMap) {
       if (!id) return;
       const next = fn(map, id);
@@ -392,12 +412,15 @@ export function Editor({ initial, store, fontsReady, focusId, onBack }: Props) {
     centerSelected: { run: () => selectedId && canvas.current?.centerOn(selectedId), enabled: view === 'map' && !!selectedId },
     history: { run: () => setHistoryOpen((v) => !v) },
     panel: { run: () => setPanelOpen((v) => !v) },
+    present: { run: () => setPresenting(true) },
+    openLink: { run: () => actions.openLink(), enabled: !!selected?.href },
+    share: { run: () => {}, enabled: false },
   };
 
   // Keyboard shortcuts (inactive while typing in a field or a dialog is open).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editingId || keysOpen) return;
+      if (editingId || keysOpen || presenting) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       const combo = comboFromEvent(e);
@@ -568,6 +591,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack }: Props) {
               </div>
             )}
           </div>
+          <button className="ib" aria-label={cmdLabel('present')} title={tip('present')} onClick={() => setPresenting(true)}><I.Present /></button>
           <button className={`ib ${historyOpen ? 'on' : ''}`} aria-label={cmdLabel('history')} aria-pressed={historyOpen} title={tip('history')} onClick={() => setHistoryOpen((v) => !v)}><I.History /></button>
           <button className="ib" aria-label={cmdLabel('shortcuts')} title={tip('shortcuts')} onClick={() => setKeysOpen(true)}><I.Keyboard /></button>
           <button className={`ib ${panelOpen ? 'on' : ''}`} aria-label={cmdLabel('panel')} aria-pressed={panelOpen} title={tip('panel')} onClick={() => setPanelOpen((v) => !v)}><I.Panel /></button>
@@ -615,6 +639,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack }: Props) {
               onMove={(id, parent) => commit(moveTopic(map, id, parent))}
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
               onZoomChange={setZoom}
+              onOpenLink={(id) => actions.openLink(id)}
             />
           ) : (
             <OutlineView
@@ -681,6 +706,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack }: Props) {
             onBranchLayout={(k) => selectedId && commit(setBranchLayout(map, selectedId, k))}
             onMarker={(m) => selectedId && commit(toggleMarker(map, selectedId, m))}
             onNote={(n) => selectedId && commit(updateTopic(map, selectedId, { note: n || undefined }))}
+            onLinkLabel={(l) => selectedId && commit(updateTopic(map, selectedId, { linkLabel: l || undefined }))}
+            onHref={(h) => selectedId && commit(updateTopic(map, selectedId, { href: h || undefined }))}
+            maps={libraryMaps}
             onMap={(p) => commit(setMapProps(map, p))}
           />
         )}
@@ -690,6 +718,16 @@ export function Editor({ initial, store, fontsReady, focusId, onBack }: Props) {
         <CommandPalette map={map} commands={paletteCommands} onPickTopic={goTo} onClose={() => setPaletteOpen(false)} />
       )}
       {keysOpen && <KeysDialog onClose={() => setKeysOpen(false)} />}
+      {presenting && (
+        <Presentation
+          map={map}
+          startId={selectedId}
+          onClose={(last) => {
+            setPresenting(false);
+            if (findTopic(map, last)) goTo(last);
+          }}
+        />
+      )}
     </div>
   );
 }

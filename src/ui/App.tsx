@@ -135,7 +135,18 @@ export function App() {
     );
   }
   return open ? (
-    <Editor key={open.map.id} initial={open.map} focusId={open.focusId} store={store} fontsReady={fontsReady} onBack={() => setOpen(null)} />
+    <Editor
+      key={open.map.id}
+      initial={open.map}
+      focusId={open.focusId}
+      store={store}
+      fontsReady={fontsReady}
+      onBack={() => setOpen(null)}
+      onOpenMap={async (id, topicId) => {
+        const m = await store.get(id);
+        if (m) setOpen(m, topicId);
+      }}
+    />
   ) : (
     <Home store={store} onOpen={setOpen} onSettings={() => setSettings(true)} onOpenFiles={openFiles} notice={notice} onNoticeShown={() => setNotice(null)} />
   );

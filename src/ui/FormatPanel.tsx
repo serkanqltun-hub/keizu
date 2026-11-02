@@ -20,6 +20,10 @@ interface Props {
   onBranchLayout(layout: LayoutKind | undefined): void;
   onMarker(id: string): void;
   onNote(note: string): void;
+  onLinkLabel(label: string): void;
+  onHref(href: string): void;
+  /** Other maps in the library, for linking a topic to one. */
+  maps: { id: string; title: string }[];
   onMap(patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor'>>): void;
 }
 
@@ -35,6 +39,10 @@ const LAYOUTS: { id: LayoutKind; d: string }[] = [
   { id: 'mindmap', d: 'M25 14c4 0 4-8 8-8M25 14c4 0 4 8 8 8M15 14c-4 0-4-8-8-8M15 14c-4 0-4 8-8 8' },
   { id: 'logic', d: 'M13 14h6M19 5v18M19 5h6M19 14h6M19 23h6' },
   { id: 'org', d: 'M20 9v5M8 14h24M8 14v5M20 14v5M32 14v5' },
+  { id: 'concept', d: 'M18 9L9 19M22 9l9 10M13 22h14' },
+  { id: 'timeline', d: 'M11 14h27M17 14v-6h5M26 14v6h5M35 14v-6' },
+  { id: 'fishbone', d: 'M27 14H3M22 14l-5-9M22 14l-5 9M12 14L7 5M12 14l-5 9' },
+  { id: 'matrix', d: 'M14 3h24v22H14zM22 3v22M30 3v22M14 10h24M14 17h24' },
 ];
 
 const BRANCHES: BranchStyle[] = ['curve', 'elbow', 'straight'];
@@ -44,13 +52,16 @@ function LayoutGlyph({ id, d }: { id: LayoutKind; d: string }) {
     <svg width="40" height="28" viewBox="0 0 40 28" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
       {id === 'mindmap' && <rect x="15" y="11" width="10" height="6" rx="2" />}
       {id === 'logic' && <rect x="3" y="11" width="10" height="6" rx="2" />}
-      {id === 'org' && <rect x="15" y="3" width="10" height="6" rx="2" />}
+      {(id === 'org' || id === 'concept') && <rect x="15" y="3" width="10" height="6" rx="2" />}
+      {id === 'timeline' && <rect x="1" y="11" width="10" height="6" rx="2" />}
+      {id === 'fishbone' && <rect x="27" y="11" width="11" height="6" rx="2" />}
+      {id === 'matrix' && <rect x="3" y="3" width="10" height="7" rx="1" />}
       <path d={d} />
     </svg>
   );
 }
 
-export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onMap, onRelationLabel, onRelationDelete }: Props) {
+export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete }: Props) {
   return (
     <aside className="panel" aria-label={t('panel.label')}>
       <div role="tablist" className="tabs">
@@ -61,7 +72,19 @@ export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab
         relation ? (
           <RelationSection key={relation.id} relation={relation} onLabel={onRelationLabel} onDelete={onRelationDelete} />
         ) : topic ? (
-          <TopicSection key={topic.id} topic={topic} isRoot={isRoot} inheritedLayout={inheritedLayout} onStyle={onStyle} onBranchLayout={onBranchLayout} onMarker={onMarker} onNote={onNote} />
+          <TopicSection
+            key={topic.id}
+            topic={topic}
+            isRoot={isRoot}
+            inheritedLayout={inheritedLayout}
+            onStyle={onStyle}
+            onBranchLayout={onBranchLayout}
+            onMarker={onMarker}
+            onNote={onNote}
+            onLinkLabel={onLinkLabel}
+            onHref={onHref}
+            maps={maps.filter((m) => m.id !== map.id)}
+          />
         ) : (
           <p className="muted">{t('panel.pickTopic')}</p>
         )
@@ -80,6 +103,9 @@ function TopicSection({
   onBranchLayout,
   onMarker,
   onNote,
+  onLinkLabel,
+  onHref,
+  maps,
 }: {
   topic: Topic;
   isRoot: boolean;
@@ -88,10 +114,19 @@ function TopicSection({
   onBranchLayout(l: LayoutKind | undefined): void;
   onMarker(id: string): void;
   onNote(n: string): void;
+  onLinkLabel(l: string): void;
+  onHref(h: string): void;
+  maps: { id: string; title: string }[];
 }) {
   const s = topic.style ?? {};
   const [note, setNote] = useState(topic.note ?? '');
   useEffect(() => setNote(topic.note ?? ''), [topic.note]);
+  const [linkLabel, setLinkLabel] = useState(topic.linkLabel ?? '');
+  useEffect(() => setLinkLabel(topic.linkLabel ?? ''), [topic.linkLabel]);
+  const internal = topic.href?.startsWith('keizu:') ? topic.href : '';
+  const [url, setUrl] = useState(internal ? '' : topic.href ?? '');
+  useEffect(() => setUrl(topic.href?.startsWith('keizu:') ? '' : topic.href ?? ''), [topic.href]);
+  const linkedMapId = internal ? /^keizu:map\/([^#]+)/.exec(internal)?.[1] : undefined;
   return (
     <>
       <section>
@@ -186,6 +221,53 @@ function TopicSection({
           />
         </label>
       </section>
+
+      <section>
+        <h3 className="lbl">{t('panel.link')}</h3>
+        {!isRoot && (
+          <label className="field">
+            <span className="small muted">{t('panel.linkLabel')}</span>
+            <input
+              value={linkLabel}
+              placeholder={t('panel.linkLabelPlaceholder')}
+              onChange={(e) => setLinkLabel(e.target.value)}
+              onBlur={() => linkLabel.trim() !== (topic.linkLabel ?? '') && onLinkLabel(linkLabel.trim())}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+              }}
+            />
+          </label>
+        )}
+        <label className="field">
+          <span className="small muted">{t('panel.linkMap')}</span>
+          <select value={linkedMapId ?? ''} onChange={(e) => onHref(e.target.value ? `keizu:map/${e.target.value}` : '')}>
+            <option value="">{t('panel.linkNone')}</option>
+            {linkedMapId && !maps.some((m) => m.id === linkedMapId) && <option value={linkedMapId}>{t('panel.linkMissing')}</option>}
+            {maps.map((m) => (
+              <option key={m.id} value={m.id}>{m.title}</option>
+            ))}
+          </select>
+        </label>
+        <label className="field">
+          <span className="small muted">{t('panel.linkUrl')}</span>
+          <input
+            type="url"
+            value={url}
+            placeholder="https://…"
+            onChange={(e) => setUrl(e.target.value)}
+            onBlur={() => {
+              const v = url.trim();
+              if (v !== (internal ? '' : topic.href ?? '') && (!v || /^https?:\/\//i.test(v) || /^mailto:/i.test(v))) onHref(v);
+            }}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            }}
+          />
+        </label>
+        {topic.href && <p className="muted small">{t('panel.linkHint')}</p>}
+      </section>
     </>
   );
 }
@@ -211,11 +293,11 @@ function MapSection({ map, onMap }: { map: MindMap; onMap: Props['onMap'] }) {
       </section>
       <section>
         <h3 className="lbl">{t('panel.layout')}</h3>
-        <div className="grid3">
+        <div className="grid4">
           {LAYOUTS.map((l) => (
             <button key={l.id} className={`opt tall ${map.layout === l.id ? 'on' : ''}`} aria-pressed={map.layout === l.id} title={t(`layout.${l.id}`)} onClick={() => onMap({ layout: l.id })}>
               <LayoutGlyph id={l.id} d={l.d} />
-              <span>{t(`layout.${l.id}`)}</span>
+              <span>{t(`layoutShort.${l.id}`)}</span>
             </button>
           ))}
         </div>
