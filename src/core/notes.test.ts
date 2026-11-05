@@ -40,7 +40,7 @@ describe('topic notes', () => {
     const { map, id } = withNote(Array.from({ length: 40 }, (_, i) => `satır ${i}`).join('\n'), true);
     const nb = layoutMap(map, approxMeasure).byId.get(id)!.noteBlock!;
     expect(nb.lines.length).toBe(12);
-    expect(nb.lines[11].endsWith('…')).toBe(true);
+    expect(nb.lines[11].runs.at(-1)!.text.endsWith('…')).toBe(true);
   });
 
   it('keeps the note and the show setting in .keizu files', () => {

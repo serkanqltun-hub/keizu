@@ -4,6 +4,7 @@ import { rangeIndices, type Boundary, type BranchStyle, type ChildRange, type La
 import { FILL_SWATCHES, THEMES } from '../core/themes';
 import { t, type MessageKey } from '../i18n';
 import { MarkerGlyph } from './MapSvg';
+import { NoteEditor } from './RichNote';
 
 interface Props {
   map: MindMap;
@@ -255,18 +256,18 @@ function TopicSection({
       {!many && (
       <>
       <section>
-        <label className="field">
-          <span className="lbl">{t('panel.note')}</span>
-          <textarea
-            id="note-field"
-            rows={5}
-            placeholder={isRoot ? t('panel.notePlaceholderRoot') : t('panel.notePlaceholder')}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            onBlur={() => note !== (topic.note ?? '') && onNote(note)}
-            onKeyDown={(e) => e.stopPropagation()}
-          />
-        </label>
+        <div className="field">
+          <label className="lbl" htmlFor="note-field">{t('panel.note')}</label>
+          <div onKeyDown={(e) => e.stopPropagation()}>
+            <NoteEditor
+              id="note-field"
+              placeholder={isRoot ? t('panel.notePlaceholderRoot') : t('panel.notePlaceholder')}
+              value={note}
+              onChange={setNote}
+              onBlur={() => note !== (topic.note ?? '') && onNote(note)}
+            />
+          </div>
+        </div>
         {!!topic.note?.trim() && (
           <label className="check">
             <span>{t('note.showInTopic')}</span>

@@ -79,6 +79,7 @@ import * as I from './Icons';
 import { MapCanvas, type CanvasHandle, type CanvasTarget, type View as CanvasView } from './MapCanvas';
 import { ContextMenu, tidy, type CtxItem } from './ContextMenu';
 import type { NoteSave } from './NotePopover';
+import { toggleTask } from '../core/richText';
 import { canvasMeasure } from './measure';
 import { OutlineView } from './OutlineView';
 import { CommandPalette, type PaletteCommand } from './CommandPalette';
@@ -216,7 +217,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   // The open right-click menu: what it is for and where.
   const [ctx, setCtx] = useState<{ x: number; y: number; target: CanvasTarget; kb?: boolean } | null>(null);
   // Topic whose note card is open on the canvas.
-  const [noteId, setNoteId] = useState<string | null>(null);
+  const [noteId, setNoteIdRaw] = useState<string | null>(null);
+  // Whether the card opens in the editor (F4) or shows the note formatted (icon click).
+  const [noteEdit, setNoteEdit] = useState(false);
+  const setNoteId = useCallback((id: string | null, edit = false) => {
+    setNoteEdit(edit);
+    setNoteIdRaw(id);
+  }, []);
   // Other maps, for linking a topic to one.
   const [libraryMaps, setLibraryMaps] = useState<{ id: string; title: string }[]>([]);
   useEffect(() => {
@@ -902,7 +909,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     note() {
       if (!selectedId) return;
       // On the map the note opens in a card next to the topic.
-      if (view === 'map') return void setNoteId(selectedId);
+      if (view === 'map') return void setNoteId(selectedId, true);
       setPanelOpen(true);
       setHistoryOpen(false);
       setPanelTab('style');
@@ -910,9 +917,12 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     },
     async openLink(id = selectedId) {
       const tp = id ? findTopic(map, id) : undefined;
-      if (!tp?.href) return;
-      const ml = parseMapLink(tp.href);
-      if (!ml) return void openExternal(tp.href).catch(() => setToast(t('toast.linkFailed')));
+      if (tp?.href) await actions.openHref(tp.href);
+    },
+    /** Opens a web address, or a Keizu map / topic link. */
+    async openHref(href: string) {
+      const ml = parseMapLink(href);
+      if (!ml) return void openExternal(href).catch(() => setToast(t('toast.linkFailed')));
       if (ml.mapId === map.id) return goTo(ml.topicId ?? mainId);
       if (!(await store.get(ml.mapId))) return setToast(t('toast.linkMissing'));
       onOpenMap(ml.mapId, ml.topicId);
@@ -1762,9 +1772,15 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onOpenLink={(id) => actions.openLink(id)}
               onContextMenu={openMenu}
               noteId={noteId}
-              onOpenNote={setNoteId}
+              noteEdit={noteEdit}
+              onOpenNote={(id) => setNoteId(id)}
               onCloseNote={() => setNoteId(null)}
               onSaveNote={saveNote}
+              onToggleNoteTask={(id, line) => {
+                const tp = findTopic(map, id);
+                if (tp?.note) commit(updateTopic(map, id, { note: toggleTask(tp.note, line) }));
+              }}
+              onOpenNoteLink={(href) => void actions.openHref(href)}
               readOnly={readOnly}
               peers={live.peers.map((p) => ({ id: p.id, name: p.name, color: p.color, selectedId: p.sel }))}
             />

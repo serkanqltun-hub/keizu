@@ -82,6 +82,12 @@ interface Props {
   onOpenNote?(id: string): void;
   onCloseNote?(): void;
   onSaveNote?(id: string, save: NoteSave): void;
+  /** Open the note card in the editor rather than formatted. */
+  noteEdit?: boolean;
+  /** Tick or untick a checklist item in a note shown inside its topic. */
+  onToggleNoteTask?(id: string, line: number): void;
+  /** A link clicked in a note shown inside its topic. */
+  onOpenNoteLink?(href: string): void;
   /** A topic's inner map was asked for (double-click, or its corner badge). */
   onEnterInner?(id: string): void;
   /**
@@ -498,6 +504,18 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       props.onOpenLink(topicId);
       return;
     }
+    const check = el.closest('[data-note-check]');
+    if (topicId && check && e.button === 0 && !props.readOnly && props.onToggleNoteTask) {
+      props.onSelect(topicId);
+      props.onToggleNoteTask(topicId, Number(check.getAttribute('data-note-check')));
+      return;
+    }
+    const noteHref = el.closest('[data-note-href]')?.getAttribute('data-note-href');
+    if (topicId && noteHref && e.button === 0 && !additive && props.onOpenNoteLink) {
+      props.onSelect(topicId);
+      props.onOpenNoteLink(noteHref);
+      return;
+    }
     if (topicId && el.closest('[data-note-glyph]') && props.onOpenNote) {
       if (topicId !== editingId) props.onSelect(topicId);
       if (topicId !== props.noteId) props.onOpenNote(topicId);
@@ -781,6 +799,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
           view={view}
           size={size}
           readOnly={props.readOnly}
+          edit={props.noteEdit}
           onSave={(save) => props.onSaveNote?.(noteBox.id, save)}
           onClose={() => props.onCloseNote?.()}
         />
