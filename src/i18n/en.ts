@@ -31,6 +31,8 @@ export const en: Record<MessageKey, string> = {
   'branch.elbow': 'Elbow',
   'branch.straight': 'Straight',
 
+  'theme.imza': 'Signature',
+  'theme.imzaNight': 'Signature Night',
   'theme.fresh': 'Fresh',
   'theme.night': 'Night',
   'theme.paper': 'Paper',

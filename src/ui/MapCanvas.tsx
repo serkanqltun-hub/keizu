@@ -432,7 +432,8 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
 
   const lines = value.split('\n');
   const textW = Math.max(...lines.map((l) => canvasMeasure(l || ' ', box.font)));
-  const w = Math.max(box.w, textW + box.padX * 2 + 8) * view.k;
+  const lead = box.lead ?? 0;
+  const w = Math.max(box.w, textW + box.padX * 2 + lead + 8) * view.k;
   // The edit box covers the text area only, below any picture.
   const bodyH = box.h - box.imageH - (box.noteBlock?.h ?? 0);
   const padY = (bodyH - box.lineHeight * box.lines.length) / 2;
@@ -478,7 +479,7 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
         font: box.font,
         fontSize: box.fontSize * view.k,
         lineHeight: `${box.lineHeight * view.k}px`,
-        padding: `${padY * view.k}px ${box.padX * view.k}px`,
+        padding: `${padY * view.k}px ${box.padX * view.k}px ${padY * view.k}px ${(box.padX + lead) * view.k}px`,
         color: text,
         background: fill === 'transparent' ? theme.canvas : fill,
         borderRadius: 8 * view.k,

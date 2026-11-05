@@ -30,6 +30,8 @@ export const tr = {
   'branch.elbow': 'Dirsek',
   'branch.straight': 'Düz',
 
+  'theme.imza': 'İmza',
+  'theme.imzaNight': 'İmza Gece',
   'theme.fresh': 'Taze',
   'theme.night': 'Gece',
   'theme.paper': 'Kâğıt',
