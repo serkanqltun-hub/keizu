@@ -58,6 +58,7 @@ export const SubtopicIcon = (p: P) => (
 );
 export const MarkerIcon = (p: P) => <Svg {...p}><path d="M5 21V4h11l-2 4 2 4H5" /></Svg>;
 export const NotebookIcon = (p: P) => <Svg {...p}><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z" /><path d="M5 18a2 2 0 0 1 2-2h12M9 8h6M9 11h4" /></Svg>;
+export const BrushIcon = (p: P) => <Svg {...p}><rect x="4" y="3" width="14" height="6" rx="1.5" /><path d="M18 6h2v5h-8v3" /><rect x="10.5" y="14" width="3" height="7" rx="1" /></Svg>;
 export const NoteIcon = (p: P) => <Svg {...p}><path d="M6 3h9l4 4v14H6z" /><path d="M9 11h7M9 15h7" /></Svg>;
 export const Trash = (p: P) => <Svg {...p}><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></Svg>;
 export const Export = (p: P) => <Svg {...p}><path d="M12 15V3M8 7l4-4 4 4" /><path d="M5 13v7h14v-7" /></Svg>;

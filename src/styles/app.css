@@ -443,6 +443,12 @@ html.kz-reduce-motion * { animation: none !important; transition: none !importan
 button.nav-item { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
 button.nav-item:hover:not(.on) { background: var(--soft); }
 
+/* Multi-select */
+.multi-note { padding-bottom: 4px; }
+.multi-note strong { display: block; font-size: 13px; color: var(--accent); }
+.multi-note p { margin: 4px 0 0; }
+.sb-sel { color: var(--accent); font-weight: 600; }
+.o-row.on-multi { background: var(--accent-soft); }
 /* Right-click menu (signature theme: Ito surfaces, Mon accents) */
 .ctx-menu { --danger: #b42d2d; position: fixed; z-index: 30; min-width: 232px; max-width: 320px; padding: 5px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(16, 24, 40, 0.18), 0 2px 6px rgba(16, 24, 40, 0.08); display: flex; flex-direction: column; outline: none; font-size: 13px; animation: kz-pop var(--dur-instant) var(--ease); transform-origin: top left; user-select: none; }
 @media (prefers-color-scheme: dark) { .ctx-menu { --danger: #ff8a8a; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); } }

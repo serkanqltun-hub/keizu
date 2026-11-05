@@ -23,7 +23,6 @@ import {
   LAYOUT_KINDS,
   type TopicShape,
   moveTopic,
-  pasteTopic,
   removeTopic,
   removeTopicImage,
   setMapProps,
@@ -34,7 +33,10 @@ import {
   updateTopic,
   type MindMap,
   type Topic,
+  type TopicStyle,
 } from '../core/model';
+import { applyStyle, copyableStyle, documentOrder, floatTopics, moveTopics, pasteTopics, removeTopics, setCollapsed, setLayouts, setMarker, topLevel, updateStyles } from '../core/bulk';
+import { parsePastedText, topicsToText } from '../core/smartPaste';
 import { FILL_SWATCHES, getTheme } from '../core/themes';
 import { SNAPSHOT_EVERY_MS } from '../core/versions';
 import type { FileLink, LibraryStore } from '../sync/types';
@@ -103,6 +105,16 @@ interface Props {
   shared?: SharedRef;
 }
 
+/**
+ * What Copy and Cut put aside, shared by every open map so topics can move
+ * between maps with their styles and notes. `text` is the same topics as a
+ * Markdown list, also put on the system clipboard: when the clipboard still
+ * holds that text, a paste uses these topics instead of re-reading the text.
+ */
+let topicClipboard: { topics: Topic[]; text: string } | null = null;
+/** The look the format painter or "Copy style" took. */
+let copiedStyle: TopicStyle | null = null;
+
 function readPref(key: string, fallback: boolean): boolean {
   try {
     const v = localStorage.getItem(key);
@@ -123,7 +135,23 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const [hist, setHist] = useState<History<MindMap>>(() => initHistory(focusId ? revealTopic(initial, focusId) : initial));
   const map = hist.present;
   const startId = focusId && findTopic(initial, focusId) ? focusId : initial.roots[0].id;
-  const [selectedId, setSelectedId] = useState<string | null>(startId);
+  // The selected topic (the one the keyboard and the panel act on) and, with
+  // multi-select, the other selected topics. Selecting one topic clears the rest.
+  const [selectedId, setPrimary] = useState<string | null>(startId);
+  const [extraIds, setExtraIds] = useState<string[]>([]);
+  const setSelectedId = useCallback((id: string | null) => {
+    setPrimary(id);
+    setExtraIds([]);
+  }, []);
+  const selectedIds = useMemo(() => {
+    const all = new Set(extraIds);
+    if (selectedId) all.add(selectedId);
+    return [...all];
+  }, [extraIds, selectedId]);
+  const multi = selectedIds.length > 1;
+  const selectedSet = useMemo(() => (multi ? new Set(selectedIds) : undefined), [multi, selectedIds]);
+  // Format painter: the copied look, and whether it stays on after a click.
+  const [painter, setPainter] = useState<{ style: TopicStyle; sticky: boolean } | null>(null);
   const [view, setView] = useState<ViewMode>(savedView);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const keymap = useKeymap();
@@ -162,7 +190,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   // Read by the autosave timer without restarting it.
   const fileRef = useRef({ link, fileState });
   fileRef.current = { link, fileState };
-  const clipboard = useRef<Topic | null>(null);
+  const pasteFallback = useRef<ReturnType<typeof setTimeout> | null>(null);
   const canvas = useRef<CanvasHandle>(null);
 
   const mainId = map.roots[0].id;
@@ -181,7 +209,35 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const selectTopic = useCallback((id: string | null) => {
     setSelectedId(id);
     if (id) setSelectedRelId(null);
-  }, []);
+  }, [setSelectedId]);
+
+  /** Makes a selected topic the one the keyboard and panel act on, keeping the rest. */
+  const focusInSelection = (id: string) => {
+    setExtraIds(selectedIds);
+    setPrimary(id);
+  };
+
+  /** Ctrl/⌘+click toggles a topic in the selection; Shift+click adds it. */
+  const extendSelection = (id: string, toggle: boolean) => {
+    setSelectedRelId(null);
+    if (selectedIds.includes(id)) {
+      if (!toggle) return focusInSelection(id);
+      const rest = selectedIds.filter((x) => x !== id);
+      setExtraIds(rest);
+      setPrimary(rest[rest.length - 1] ?? null);
+      return;
+    }
+    setExtraIds(selectedIds);
+    setPrimary(id);
+  };
+
+  /** Selects a set of topics at once (box select, select all, paste). */
+  const selectMany = (ids: string[], additive = false) => {
+    const all = additive ? [...new Set([...selectedIds, ...ids])] : ids;
+    setSelectedRelId(null);
+    setExtraIds(all);
+    setPrimary(additive && selectedId && all.includes(selectedId) ? selectedId : all[0] ?? null);
+  };
 
   // Live collaboration (Keizu Server): maps that arrive from the session
   // replace the editor's map without becoming an undo step.
@@ -345,9 +401,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   }, [toast]);
 
   // If the selected topic disappears (undo, collapse), fall back to the root.
+  // Other selected topics that disappear just leave the selection.
   useEffect(() => {
     if (selectedId && !layout.byId.has(selectedId)) setSelectedId(mainId);
-  }, [layout, selectedId, mainId]);
+    else if (extraIds.some((id) => !layout.byId.has(id))) setExtraIds(extraIds.filter((id) => layout.byId.has(id)));
+  }, [layout, selectedId, extraIds, mainId, setSelectedId]);
 
   const startEdit = (id: string, seed: string | null = null) => {
     if (readOnly) return;
@@ -419,6 +477,14 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         setSelectedRelId(null);
         return;
       }
+      if (multi) {
+        const n = topLevel(map, selectedIds.filter((id) => id !== mainId)).length;
+        const r = removeTopics(map, selectedIds);
+        if (r.map === map) return;
+        commit(r.map, r.nextId);
+        setToast(t('toast.deletedN', { n }));
+        return;
+      }
       if (!selectedId || selectedId === mainId) return;
       const r = removeTopic(map, selectedId);
       commit(r.map, r.nextId);
@@ -435,18 +501,101 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (m) setHist((h) => replace(h, (fromLive.current = { ...latest.current, ...m } as MindMap)));
     },
     collapse() {
-      if (selectedId) commit(toggleCollapse(map, selectedId));
+      if (!selectedId) return;
+      if (!multi) return commit(toggleCollapse(map, selectedId));
+      // Several topics follow the first one that can fold.
+      const first = selectedIds.map((id) => findTopic(map, id)).find((tp) => tp && tp.children.length && tp.id !== mainId);
+      if (first) commit(setCollapsed(map, selectedIds, !first.collapsed));
     },
     copy(cut = false) {
       if (!selected) return;
-      clipboard.current = selected;
-      if (cut && selectedId !== mainId) actions.remove();
-      setToast(cut ? t('toast.cut') : t('toast.copied'));
+      const ids = multi ? topLevel(map, selectedIds) : [selected.id];
+      const topics = ids.map((id) => findTopic(map, id)!).filter(Boolean);
+      const text = topicsToText(topics);
+      topicClipboard = { topics, text };
+      // Other apps get the topics as a Markdown list.
+      navigator.clipboard?.writeText(text).catch(() => {});
+      if (cut) {
+        const r = removeTopics(map, ids);
+        if (r.map !== map) commit(r.map, r.nextId);
+      }
+      const n = topics.length;
+      setToast(n > 1 ? t(cut ? 'toast.cutN' : 'toast.copiedN', { n }) : cut ? t('toast.cut') : t('toast.copied'));
     },
-    paste() {
-      if (!selectedId || !clipboard.current) return;
-      const r = pasteTopic(map, selectedId, clipboard.current);
-      commit(r.map, r.id);
+    /** Pastes topics under the selected topic and selects what came in. */
+    pasteTopics(topics: Topic[]) {
+      const parent = selectedId ?? mainId;
+      if (!topics.length) return;
+      const r = pasteTopics(map, parent, topics);
+      if (!r.ids.length) return;
+      commit(r.map);
+      selectMany(r.ids);
+      if (r.ids.length > 1) setToast(t('toast.pastedN', { n: r.ids.length }));
+      if (view === 'map') setTimeout(() => canvas.current?.centerOn(r.ids[0]), 0);
+    },
+    /** Smart paste: Keizu topics, a picture, or text that becomes a tree. */
+    async pasteData(data: { text?: string; image?: Blob }) {
+      if (readOnlyRef.current) return setToast(t('live.readOnly'));
+      const text = data.text?.replace(/\s+$/, '') ?? '';
+      if (data.image) {
+        try {
+          const img = await loadImageFile(data.image);
+          const parent = selectedId ?? mainId;
+          const added = addChild(latest.current, parent, t('topic.image'));
+          commit(setTopicImage(added.map, added.id, img.dataUrl, img.width, img.height), added.id);
+        } catch (err) {
+          setToast((err as Error).message || t('toast.imageFailed'));
+        }
+        return;
+      }
+      const clip = topicClipboard;
+      if (clip && (!text || text === clip.text.replace(/\s+$/, ''))) return actions.pasteTopics(clip.topics);
+      if (text.trim()) actions.pasteTopics(parsePastedText(text));
+    },
+    /** Paste without a paste event (palette, toolbar): read the clipboard ourselves. */
+    async paste() {
+      let text: string | undefined;
+      try {
+        text = await navigator.clipboard?.readText();
+      } catch {
+        /* not allowed: use what Keizu copied */
+      }
+      await actions.pasteData({ text });
+    },
+    selectAll() {
+      const ids = documentOrder(map).filter((id) => layout.byId.has(id));
+      selectMany(ids);
+      setPrimary(selectedId && ids.includes(selectedId) ? selectedId : mainId);
+    },
+    /** Starts the format painter with the selected topic's look. */
+    painter(sticky = false) {
+      if (painter && !sticky) return setPainter(null);
+      if (!selected) return;
+      const style = copyableStyle(selected);
+      copiedStyle = style;
+      if (view !== 'map') switchView('map');
+      setPainter({ style, sticky });
+      setToast(t(sticky ? 'toast.painterSticky' : 'toast.painter'));
+    },
+    paint(id: string) {
+      if (!painter) return;
+      const next = applyStyle(map, [id], painter.style);
+      if (next !== map) commit(next);
+      selectTopic(id);
+      if (!painter.sticky) {
+        setPainter(null);
+        setToast(null);
+      }
+    },
+    copyStyle() {
+      if (!selected) return;
+      copiedStyle = copyableStyle(selected);
+      setToast(t('toast.styleCopied'));
+    },
+    pasteStyle() {
+      if (!copiedStyle) return setToast(t('toast.noStyle'));
+      const next = applyStyle(map, selectedIds, copiedStyle);
+      if (next !== map) commit(next);
     },
     relation() {
       if (!selectedId) return;
@@ -505,7 +654,12 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
 
   const openMenu = (target: CanvasTarget, x: number, y: number) => {
     setRelationFrom(null);
-    if (target.kind === 'topic') selectTopic(target.id);
+    // Right-clicking one of several selected topics keeps them all selected,
+    // so the menu acts on the whole selection.
+    if (target.kind === 'topic') {
+      if (multi && selectedIds.includes(target.id)) focusInSelection(target.id);
+      else selectTopic(target.id);
+    }
     if (target.kind === 'relation') {
       setSelectedRelId(target.id);
       setSelectedId(null);
@@ -546,6 +700,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       ...extra,
     });
     const sep: CtxItem = { type: 'sep' };
+    // With several topics selected, look changes go to all of them.
+    const targets = multi && selectedIds.includes(id) ? selectedIds : [id];
+    const restyle = (patch: TopicStyle) => commit(updateStyles(map, targets, patch));
+    const relayout = (k: Topic['layout']) => commit(setLayouts(map, targets.filter((x) => x !== mainId || targets.length === 1), k));
     const box = layout.byId.get(id);
     const ownLayout = tp.layout;
     const inherited = (box ? layout.byId.get(box.parentId ?? '')?.layout : undefined) ?? map.layout;
@@ -577,7 +735,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           { value: undefined, label: t('ctx.autoColor'), on: !style.fill },
           ...FILL_SWATCHES.map((c) => ({ value: c, label: t('panel.fillColor', { color: c }), on: style.fill === c })),
         ],
-        pick: (fill) => commit(updateStyle(map, id, { fill })),
+        pick: (fill) => restyle({ fill }),
       },
       {
         type: 'sub',
@@ -585,13 +743,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         label: t('ctx.shape'),
         icon: <I.ShapeIcon size={16} />,
         items: [
-          { type: 'item', id: 'auto', label: t('panel.auto'), checked: !style.shape, run: () => commit(updateStyle(map, id, { shape: undefined })) },
+          { type: 'item', id: 'auto', label: t('panel.auto'), checked: !style.shape, run: () => restyle({ shape: undefined }) },
           ...(['rounded', 'pill', 'rect', 'underline', 'none'] as TopicShape[]).map<CtxItem>((sh) => ({
             type: 'item',
             id: sh,
             label: t(`shape.${sh}`),
             checked: style.shape === sh,
-            run: () => commit(updateStyle(map, id, { shape: sh })),
+            run: () => restyle({ shape: sh }),
           })),
         ],
       },
@@ -601,9 +759,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         label: t('ctx.branchLayout'),
         icon: <I.MapIcon size={16} />,
         items: [
-          { type: 'item', id: 'inherit', label: t('panel.branchInherit', { layout: layoutName(inherited) }), checked: !ownLayout, run: () => commit(setBranchLayout(map, id, undefined)) },
+          { type: 'item', id: 'inherit', label: t('panel.branchInherit', { layout: layoutName(inherited) }), checked: !ownLayout, run: () => relayout(undefined) },
           { type: 'sep' },
-          ...LAYOUT_KINDS.map<CtxItem>((k) => ({ type: 'item', id: k, label: layoutName(k), checked: ownLayout === k, run: () => commit(setBranchLayout(map, id, k)) })),
+          ...LAYOUT_KINDS.map<CtxItem>((k) => ({ type: 'item', id: k, label: layoutName(k), checked: ownLayout === k, run: () => relayout(k) })),
         ],
       },
       {
@@ -617,17 +775,19 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           setPanelTab('style');
         },
       },
+      item('formatPainter', () => actions.painter(), { label: t('tb.painter'), icon: <I.BrushIcon size={16} /> }),
+      copiedStyle && item('pasteStyle', actions.pasteStyle, { icon: <I.BrushIcon size={16} /> }),
       sep,
-      hasKids && !isMain && item('collapse', actions.collapse, { label: tp.collapsed ? t('ctx.expand') : t('ctx.collapse'), icon: <I.Collapse size={16} /> }),
+      (hasKids || multi) && !isMain && commands.collapse.enabled !== false && item('collapse', actions.collapse, { label: tp.collapsed ? t('ctx.expand') : t('ctx.collapse'), icon: <I.Collapse size={16} /> }),
       item('relation', actions.relation, { icon: <I.RelationIcon size={16} /> }),
       layout.byId.get(id)?.layout === 'flow' && item('merge', actions.merge, { icon: <I.MergeIcon size={16} /> }),
       view === 'map' && { type: 'item', id: 'focus', label: t('ctx.focus'), keys: keyOf('centerSelected'), icon: <I.Target size={16} />, run: () => canvas.current?.centerOn(id) },
       sep,
-      !isMain && item('cut', () => actions.copy(true), { icon: <I.Cut size={16} /> }),
+      (!isMain || multi) && item('cut', () => actions.copy(true), { icon: <I.Cut size={16} /> }),
       item('copy', () => actions.copy(), { icon: <I.Copy size={16} /> }),
-      item('paste', actions.paste, { disabled: !clipboard.current, icon: <I.Paste size={16} /> }),
+      item('paste', () => void actions.paste(), { icon: <I.Paste size={16} /> }),
       sep,
-      !isMain && item('remove', actions.remove, { danger: true, icon: <I.Trash size={16} /> }),
+      (!isMain || multi) && item('remove', actions.remove, { label: multi && targets.length > 1 ? `${cmdLabel('remove')} (${targets.length})` : cmdLabel('remove'), danger: true, icon: <I.Trash size={16} /> }),
     ]);
   };
 
@@ -645,15 +805,23 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     if (readOnly) return tidy([...viewItems, sep, ...more]);
     return tidy([
       { type: 'item', id: 'floating', label: t('ctx.floatingHere'), icon: <I.FloatingIcon size={16} />, run: () => actions.floating(pos) },
-      clipboard.current && {
+      topicClipboard && {
         type: 'item',
         id: 'paste',
         label: t('ctx.pasteHere'),
         keys: keyOf('paste'),
         icon: <I.Paste size={16} />,
         run: () => {
-          const r = pasteFloating(map, pos, clipboard.current!);
-          commit(r.map, r.id);
+          // Several copied topics land one below the other.
+          let next = map;
+          const ids: string[] = [];
+          topicClipboard!.topics.forEach((tp, i) => {
+            const r = pasteFloating(next, { x: pos.x, y: pos.y + i * 60 }, tp);
+            next = r.map;
+            ids.push(r.id);
+          });
+          commit(next);
+          selectMany(ids);
         },
       },
       sep,
@@ -708,13 +876,17 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     addSibling: { run: () => actions.addSibling(), enabled: !!selectedId },
     addSiblingBefore: { run: () => actions.addSibling(true), enabled: !!selectedId },
     edit: { run: () => selectedId && startEdit(selectedId), enabled: !!selectedId },
-    remove: { run: actions.remove, enabled: !!selectedRelId || (!!selectedId && selectedId !== mainId) },
+    remove: { run: actions.remove, enabled: !!selectedRelId || selectedIds.some((id) => id !== mainId) },
     undo: { run: actions.undo, enabled: session ? session.canUndo() : hist.past.length > 0 },
     redo: { run: actions.redo, enabled: session ? session.canRedo() : hist.future.length > 0 },
     copy: { run: () => actions.copy(), enabled: !!selected },
-    cut: { run: () => actions.copy(true), enabled: !!selected && selectedId !== mainId },
-    paste: { run: actions.paste, enabled: !!selectedId && !!clipboard.current },
-    collapse: { run: actions.collapse, enabled: !!selected?.children.length && selectedId !== mainId },
+    cut: { run: () => actions.copy(true), enabled: selectedIds.some((id) => id !== mainId) },
+    paste: { run: () => void actions.paste(), enabled: !readOnly },
+    collapse: { run: actions.collapse, enabled: (multi ? selectedIds : selectedId ? [selectedId] : []).some((id) => id !== mainId && !!findTopic(map, id)?.children.length) },
+    selectAll: { run: actions.selectAll },
+    formatPainter: { run: () => actions.painter(), enabled: !!selected && !readOnly },
+    copyStyle: { run: actions.copyStyle, enabled: !!selected },
+    pasteStyle: { run: actions.pasteStyle, enabled: !!selectedId && !readOnly },
     moveUp: { run: () => actions.move(selectedId, (m, id) => moveAmongSiblings(m, id, -1)), enabled: !!selectedId },
     moveDown: { run: () => actions.move(selectedId, (m, id) => moveAmongSiblings(m, id, 1)), enabled: !!selectedId },
     indent: { run: () => actions.move(selectedId, indentTopic), enabled: !!selectedId },
@@ -752,6 +924,17 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (!combo) return;
       if (paletteOpen && combo !== 'Mod+K') return;
       const id = commandFor(keymap, combo, view === 'outline');
+      if (id === 'paste' && combo === 'Mod+V') {
+        // Let the browser fire its paste event, which carries the clipboard
+        // (text, pictures) without asking for permission. If none comes,
+        // read the clipboard directly.
+        if (pasteFallback.current) clearTimeout(pasteFallback.current);
+        pasteFallback.current = setTimeout(() => {
+          pasteFallback.current = null;
+          void actions.paste();
+        }, 120);
+        return;
+      }
       if (id) {
         e.preventDefault();
         // Arrow keys and editing keys act on the selected relation, if any.
@@ -762,7 +945,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       }
       if (e.key === 'Escape') {
         e.preventDefault();
-        if (relationFrom) setRelationFrom(null);
+        if (painter) {
+          setPainter(null);
+          setToast(null);
+        } else if (relationFrom) setRelationFrom(null);
         else selectTopic(null), setSelectedRelId(null);
         return;
       }
@@ -774,6 +960,31 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+  });
+
+  // Smart paste: whatever is on the clipboard becomes topics.
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      if (editingId || keysOpen || presenting || shareOpen || paletteOpen) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
+      if (pasteFallback.current) {
+        clearTimeout(pasteFallback.current);
+        pasteFallback.current = null;
+      }
+      const dt = e.clipboardData;
+      if (!dt) return;
+      e.preventDefault();
+      const text = dt.getData('text/plain');
+      // Office apps put a picture of the copied text next to the text: text wins.
+      const image = text.trim()
+        ? undefined
+        : [...dt.files].find((f) => f.type.startsWith('image/')) ?? [...dt.items].find((i) => i.kind === 'file' && i.type.startsWith('image/'))?.getAsFile() ?? undefined;
+      void actions.pasteData({ text, image });
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
   });
 
   const paletteCommands: PaletteCommand[] = COMMANDS.filter((c) => c.id !== 'palette' && (!c.outlineOnly || view === 'outline')).map((c) => ({
@@ -869,6 +1080,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
                 selectTopic(id);
                 canvas.current?.centerOn(id);
               }}
+              selectedIds={selectedSet}
+              onSelectExtend={extendSelection}
               onStartEdit={(id) => {
                 selectTopic(id);
                 startEdit(id);
@@ -926,6 +1139,16 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           )}
           <button className="tb" title={t('tb.floatingTip')} onClick={() => actions.floating()}><I.FloatingIcon />{t('tb.floating')}</button>
           <button className="tb" title={t('tb.markerTip')} disabled={!selectedId} onClick={() => { setPanelOpen(true); setHistoryOpen(false); setPanelTab('style'); }}><I.MarkerIcon />{t('tb.marker')}</button>
+          <button
+            className={`tb ${painter ? 'on' : ''}`}
+            title={tip('formatPainter', t('tb.painterTip'))}
+            aria-pressed={!!painter}
+            disabled={!selected && !painter}
+            onClick={(e) => (e.detail > 1 ? undefined : actions.painter())}
+            onDoubleClick={() => actions.painter(true)}
+          >
+            <I.BrushIcon />{t('tb.painter')}
+          </button>
           <button className="tb" title={t('tb.noteTip')} disabled={!selectedId} onClick={actions.note}><I.NoteIcon />{t('tb.note')}</button>
           {selected?.image ? (
             <button className="tb" title={t('tb.removeImageTip')} onClick={() => selectedId && commit(removeTopicImage(map, selectedId))}><I.ImageIcon />{t('tb.removeImage')}</button>
@@ -943,8 +1166,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               e.target.value = '';
             }}
           />
-          <button className="tb" title={tip('collapse')} disabled={!selected?.children.length || selectedId === mainId} onClick={actions.collapse}><I.Collapse />{t('tb.collapse')}</button>
-          <button className="tb" title={tip('remove')} disabled={!selectedRelId && (!selectedId || selectedId === mainId)} onClick={actions.remove}><I.Trash />{t('tb.delete')}</button>
+          <button className="tb" title={tip('collapse')} disabled={!commands.collapse.enabled} onClick={actions.collapse}><I.Collapse />{t('tb.collapse')}</button>
+          <button className="tb" title={tip('remove')} disabled={!commands.remove.enabled} onClick={actions.remove}><I.Trash />{t('tb.delete')}</button>
           <span className="tb-sep" />
           <div className="seg-tabs layout-switch" role="group" aria-label={t('layout.switch')}>
             {(['mindmap', 'logic', 'org'] as const).map((k) => (
@@ -1036,6 +1259,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               editSeed={editSeed}
               focusId={startId}
               onSelect={selectTopic}
+              selectedIds={selectedSet}
+              onSelectExtend={extendSelection}
+              onSelectBox={(ids, additive) => selectMany(ids, additive)}
+              onMoveMany={(ids, parent) => commit(moveTopics(map, ids, parent))}
+              onFloatMany={(ids, delta) => commit(floatTopics(map, ids, (id) => layout.byId.get(id), delta))}
+              painting={!!painter}
+              onPaint={actions.paint}
               selectedRelId={selectedRelId}
               relationFrom={relationFrom}
               onSelectRelation={(id) => {
@@ -1086,6 +1316,12 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               editSeed={editSeed}
               colorOf={colorOf}
               onSelect={selectTopic}
+              selectedIds={selectedSet}
+              onSelectExtend={extendSelection}
+              onSelectRange={(ids) => {
+                selectMany(ids);
+                setPrimary(ids.includes(selectedId ?? '') ? selectedId : ids[0]);
+              }}
               onStartEdit={(id) => startEdit(id)}
               onCommitEdit={commitEdit}
               onCancelEdit={cancelEdit}
@@ -1112,6 +1348,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         </span>
         <span>{t('status.topics', { n: countAll(map) })}</span>
         <span>{t('status.relations', { n: map.relations.length })}</span>
+        {multi && <span className="sb-sel">{t('status.selected', { n: selectedIds.length })}</span>}
         {live.peers.length > 0 && <span>{t('live.peers', { n: live.peers.length })}</span>}
         <span>{layoutName(map.layout)}</span>
         <button className="sb-lang" title={t('status.lang')} onClick={() => commands.language.run()}>{getLang().toUpperCase()}</button>
@@ -1140,12 +1377,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
             onRelationLabel={(label) => selectedRelId && commit(updateRelation(map, selectedRelId, { label: label || undefined }))}
             onRelationDelete={() => actions.remove()}
             isRoot={selectedId === mainId}
+            count={selectedIds.length}
             inheritedLayout={inheritedLayout}
             tab={panelTab}
             onTab={setPanelTab}
-            onStyle={(p) => selectedId && commit(updateStyle(map, selectedId, p))}
-            onBranchLayout={(k) => selectedId && commit(setBranchLayout(map, selectedId, k))}
-            onMarker={(m) => selectedId && commit(toggleMarker(map, selectedId, m))}
+            onStyle={(p) => selectedId && commit(multi ? updateStyles(map, selectedIds, p) : updateStyle(map, selectedId, p))}
+            onBranchLayout={(k) => selectedId && commit(multi ? setLayouts(map, selectedIds.filter((id) => id !== mainId), k) : setBranchLayout(map, selectedId, k))}
+            onMarker={(m) => selectedId && commit(multi ? setMarker(map, selectedIds, m, !selected?.markers?.includes(m)) : toggleMarker(map, selectedId, m))}
             onNote={(n) => selectedId && commit(updateTopic(map, selectedId, { note: n || undefined }))}
             onLinkLabel={(l) => selectedId && commit(updateTopic(map, selectedId, { linkLabel: l || undefined }))}
             onHref={(h) => selectedId && commit(updateTopic(map, selectedId, { href: h || undefined }))}

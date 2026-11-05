@@ -10,6 +10,8 @@ interface Props {
   topic: Topic | undefined;
   relation: Relation | undefined;
   isRoot: boolean;
+  /** How many topics are selected; above 1 the changes go to all of them. */
+  count?: number;
   /** Layout the selected topic's branch gets when it has none of its own. */
   inheritedLayout: LayoutKind;
   onRelationLabel(label: string): void;
@@ -70,7 +72,7 @@ function LayoutGlyph({ id, d }: { id: LayoutKind; d: string }) {
   );
 }
 
-export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete }: Props) {
+export function FormatPanel({ map, topic, relation, isRoot, count = 1, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete }: Props) {
   return (
     <aside className="panel" aria-label={t('panel.label')}>
       <div role="tablist" className="tabs">
@@ -85,6 +87,7 @@ export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab
             key={topic.id}
             topic={topic}
             isRoot={isRoot}
+            count={count}
             inheritedLayout={inheritedLayout}
             onStyle={onStyle}
             onBranchLayout={onBranchLayout}
@@ -107,6 +110,7 @@ export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab
 function TopicSection({
   topic,
   isRoot,
+  count,
   inheritedLayout,
   onStyle,
   onBranchLayout,
@@ -118,6 +122,7 @@ function TopicSection({
 }: {
   topic: Topic;
   isRoot: boolean;
+  count: number;
   inheritedLayout: LayoutKind;
   onStyle(p: TopicStyle): void;
   onBranchLayout(l: LayoutKind | undefined): void;
@@ -137,8 +142,15 @@ function TopicSection({
   const [url, setUrl] = useState(internal ? '' : topic.href ?? '');
   useEffect(() => setUrl(topic.href?.startsWith('keizu:') ? '' : topic.href ?? ''), [topic.href]);
   const linkedMapId = internal ? /^keizu:map\/([^#]+)/.exec(internal)?.[1] : undefined;
+  const many = count > 1;
   return (
     <>
+      {many && (
+        <section className="multi-note" role="status">
+          <strong>{t('panel.multi', { n: count })}</strong>
+          <p className="muted small">{t('panel.multiHint')}</p>
+        </section>
+      )}
       <section>
         <h3 className="lbl">{t('panel.shape')}</h3>
         <div className="grid5">
@@ -176,7 +188,7 @@ function TopicSection({
         </div>
       </section>
 
-      {!isRoot && (
+      {(!isRoot || many) && (
         <section>
           <h3 className="lbl">{t('panel.branchLayout')}</h3>
           <div className="grid4">
@@ -217,6 +229,8 @@ function TopicSection({
         </div>
       </section>
 
+      {!many && (
+      <>
       <section>
         <label className="field">
           <span className="lbl">{t('panel.note')}</span>
@@ -284,6 +298,8 @@ function TopicSection({
         </label>
         {topic.href && <p className="muted small">{t('panel.linkHint')}</p>}
       </section>
+      </>
+      )}
     </>
   );
 }

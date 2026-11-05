@@ -19,6 +19,12 @@ interface Props {
   /** Branch colours by topic id, so rows match the map. */
   colorOf(id: string): string;
   onSelect(id: string): void;
+  /** Every selected topic, when more than one is. */
+  selectedIds?: ReadonlySet<string>;
+  /** Ctrl/⌘+click: add or remove a row from the selection. */
+  onSelectExtend?(id: string, toggle: boolean): void;
+  /** Shift+click: select every row from the selected one to this one. */
+  onSelectRange?(ids: string[]): void;
   onStartEdit(id: string): void;
   onCommitEdit(id: string, text: string): void;
   onCancelEdit(): void;
@@ -65,7 +71,7 @@ export function OutlineView(props: Props) {
           const hasKids = tp.children.length > 0;
           // The central topic can't be collapsed (same as on the map).
           const canToggle = hasKids && !(r.root === 0 && r.depth === 0);
-          const selected = tp.id === selectedId;
+          const selected = tp.id === selectedId || !!props.selectedIds?.has(tp.id);
           const firstLine = tp.text.split('\n')[0] || ' ';
           const multi = tp.text.includes('\n');
           return (
@@ -79,6 +85,14 @@ export function OutlineView(props: Props) {
               aria-expanded={hasKids ? !tp.collapsed : undefined}
               onPointerDown={(e) => {
                 if (e.button !== 0 || (e.target as Element).closest('.o-toggle, textarea')) return;
+                if ((e.ctrlKey || e.metaKey) && props.onSelectExtend) return props.onSelectExtend(tp.id, true);
+                if (e.shiftKey && props.onSelectRange) {
+                  const from = rows.findIndex((x) => x.topic.id === selectedId);
+                  if (from >= 0) {
+                    const [a, b] = from < index ? [from, index] : [index, from];
+                    return props.onSelectRange(rows.slice(a, b + 1).map((x) => x.topic.id));
+                  }
+                }
                 props.onSelect(tp.id);
               }}
               onDoubleClick={(e) => !(e.target as Element).closest('.o-toggle') && props.onStartEdit(tp.id)}
