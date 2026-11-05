@@ -6,7 +6,7 @@ import { strFromU8, unzipSync } from 'fflate';
 import { isZip, mimeFromName, toDataUrl } from './archive';
 import { imageSize } from './imageSize';
 import { emptyMap } from './io';
-import { createTopic, type LayoutKind, type MindMap, type Relation, type Topic } from './model';
+import { createTopic, newId, type LayoutKind, type MindMap, type Relation, type Topic } from './model';
 import { child, childrenNamed, parseXml, type XmlNode } from './xml';
 
 const TASK: Record<string, number> = {
@@ -77,7 +77,9 @@ interface JTopic {
   id?: string;
   title?: string;
   structureClass?: string;
-  children?: { attached?: JTopic[]; detached?: JTopic[] };
+  children?: { attached?: JTopic[]; detached?: JTopic[]; summary?: JTopic[] };
+  boundaries?: { range?: string; title?: string }[];
+  summaries?: { range?: string; topicId?: string }[];
   notes?: { plain?: { content?: string } };
   markers?: { markerId: string }[];
   image?: { src?: string; width?: number; height?: number };
@@ -99,7 +101,34 @@ function fromJsonTopic(ctx: Ctx, j: JTopic): Topic {
   j.markers?.forEach((m) => addMarker(t, m.markerId));
   if (j.image) attachImage(ctx, t, j.image.src, j.image.width, j.image.height);
   if (j.branch === 'folded' && t.children.length) t.collapsed = true;
+  addRuns(t, j);
   return t;
+}
+
+/** Child ids for an XMind range like "(0,2)"; undefined if it does not fit. */
+function runOf(t: Topic, range?: string): { from: string; to: string } | undefined {
+  const m = /^\((\d+),(\d+)\)$/.exec(range?.replace(/\s/g, '') ?? '');
+  if (!m) return undefined;
+  const a = t.children[Number(m[1])], b = t.children[Number(m[2])];
+  return a && b ? { from: a.id, to: b.id } : undefined;
+}
+
+/** XMind boundaries and summaries of a topic's children. */
+function addRuns(t: Topic, j: JTopic) {
+  const boundaries = (j.boundaries ?? []).flatMap((b) => {
+    const run = runOf(t, b.range);
+    const label = b.title?.trim();
+    return run ? [{ id: newId('b'), ...run, ...(label ? { label } : {}) }] : [];
+  });
+  if (boundaries.length) t.boundaries = boundaries;
+  const sumTopics = new Map((j.children?.summary ?? []).map((s) => [s.id, s]));
+  const summaries = (j.summaries ?? []).flatMap((s) => {
+    const run = runOf(t, s.range);
+    const jt = s.topicId ? sumTopics.get(s.topicId) : undefined;
+    if (!run || !jt) return [];
+    return [{ ...run, topic: createTopic((jt.title ?? '').trim() || 'Özet') }];
+  });
+  if (summaries.length) t.summaries = summaries;
 }
 
 function sheetFromJson(ctx: Ctx, s: JSheet): MindMap | undefined {

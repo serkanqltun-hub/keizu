@@ -119,6 +119,29 @@ describe('inner maps', () => {
     expect(writeBack(doc, [g.a], { ...v2, relations: [] }).relations).toHaveLength(0);
   });
 
+  it('keeps boundaries and summaries with the children they cover', () => {
+    const g = game();
+    // A has an outer child too; a boundary on each side.
+    const r = addChild(g.map, g.a, 'Dışarıda');
+    const a = findTopic(r.map, g.a)!;
+    const withRanges: MindMap = updateTopic(r.map, g.a, {
+      boundaries: [
+        { id: 'b-in', from: g.k, to: g.k },
+        { id: 'b-out', from: r.id, to: r.id },
+      ],
+    });
+    expect(a.children).toHaveLength(2);
+    const outer = viewOf(withRanges, []);
+    expect(findTopic(outer, g.a)!.boundaries!.map((b) => b.id)).toEqual(['b-out']);
+    const inner = viewOf(withRanges, [g.a]);
+    expect(inner.roots[0].boundaries!.map((b) => b.id)).toEqual(['b-in']);
+    // Editing either side keeps both.
+    const back = writeBack(withRanges, [g.a], updateTopic(inner, g.k, { text: 'Keşif!' }));
+    expect(findTopic(back, g.a)!.boundaries!.map((b) => b.id).sort()).toEqual(['b-in', 'b-out']);
+    const back2 = writeBack(withRanges, [], updateTopic(outer, g.c, { text: 'C!' }));
+    expect(findTopic(back2, g.a)!.boundaries!.map((b) => b.id).sort()).toEqual(['b-in', 'b-out']);
+  });
+
   it('never stores the view-only size', () => {
     const g = game();
     const doc = writeBack(g.map, [], updateTopic(viewOf(g.map, []), g.c, { text: 'C!' }));

@@ -57,7 +57,10 @@ export type CommandId =
   | 'branchToInner'
   | 'innerToBranch'
   | 'addInner'
-  | 'insertMap';
+  | 'insertMap'
+  | 'focus'
+  | 'boundary'
+  | 'summary';
 
 
 export interface CommandDef {
@@ -98,12 +101,15 @@ export const COMMANDS: CommandDef[] = [
   { id: 'merge', keys: ['Mod+Tab', 'Alt+B'], group: 'edit' },
   { id: 'floating', keys: [], group: 'edit' },
   { id: 'note', keys: ['F4'], group: 'edit' },
+  { id: 'boundary', keys: ['Mod+Shift+B'], group: 'edit' },
+  { id: 'summary', keys: ['Mod+Shift+G'], group: 'edit' },
   { id: 'navLeft', keys: ['ArrowLeft'], group: 'navigate' },
   { id: 'navRight', keys: ['ArrowRight'], group: 'navigate' },
   { id: 'navUp', keys: ['ArrowUp'], group: 'navigate' },
   { id: 'navDown', keys: ['ArrowDown'], group: 'navigate' },
   { id: 'collapse', keys: ['Mod+/'], group: 'navigate' },
   { id: 'centerSelected', keys: ['Mod+Enter'], group: 'navigate' },
+  { id: 'focus', keys: ['F6'], group: 'navigate' },
   { id: 'toggleOutline', keys: ['Mod+Alt+O'], group: 'view' },
   { id: 'notebook', keys: ['Mod+Alt+N'], group: 'view' },
   { id: 'zoomIn', keys: ['Mod+=', 'Mod++'], group: 'view' },

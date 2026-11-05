@@ -89,6 +89,7 @@ export function searchMap(map: MindMap, query: string, limit = 50): TopicHit[] {
     else if (n) hits.push({ id: t.id, text: t.text, path: [...path], field: 'note', match: { ...n, score: n.score - 60 } });
     path.push(t.text);
     t.children.forEach(walk);
+    t.summaries?.forEach((s) => walk(s.topic));
     path.pop();
   };
   map.roots.forEach(walk);

@@ -28,6 +28,20 @@ export function innerSize(t: Topic): number {
   return t.children.reduce((n, c) => (c.inside ? n + count(c) : n), 0);
 }
 
+/** Boundaries and summaries of `t` whose child ranges `keep` accepts. */
+function ranges(t: Topic, keep: (id: string) => boolean): Pick<Topic, 'boundaries' | 'summaries'> {
+  const b = t.boundaries?.filter((r) => keep(r.from) && keep(r.to));
+  const s = t.summaries?.filter((r) => keep(r.from) && keep(r.to));
+  return { boundaries: b?.length ? b : undefined, summaries: s?.length ? s : undefined };
+}
+
+function withRanges(t: Topic, r: Pick<Topic, 'boundaries' | 'summaries'>): Topic {
+  const out: Topic = { ...t, ...r };
+  if (!out.boundaries) delete out.boundaries;
+  if (!out.summaries) delete out.summaries;
+  return out;
+}
+
 /** The topic without its inner topics, marked with how many it hides. */
 function strip(t: Topic): Topic {
   let changed = false;
@@ -43,12 +57,15 @@ function strip(t: Topic): Topic {
   }
   const size = innerSize(t) || (t.innerKind ? 1 : 0);
   if (!changed && !size) return t;
-  return size ? { ...t, innerSize: size, children: kids } : { ...t, children: kids };
+  const shown = new Set(kids.map((k) => k.id));
+  const out = withRanges({ ...t, children: kids }, ranges(t, (id) => shown.has(id)));
+  return size ? { ...out, innerSize: size } : out;
 }
 
 function ids(roots: Topic[], out = new Set<string>()): Set<string> {
   const walk = (t: Topic) => {
     out.add(t.id);
+    t.summaries?.forEach((s) => out.add(s.topic.id));
     t.children.forEach(walk);
   };
   roots.forEach(walk);
@@ -84,10 +101,12 @@ export function viewOf(doc: MindMap, path: InnerPath): MindMap {
     const shown = ids(roots);
     return { ...doc, roots, relations: doc.relations.filter((r) => shown.has(r.from) && shown.has(r.to)) };
   }
-  const root: Topic = {
-    ...host,
-    children: host.children.filter((c) => c.inside).map((c) => strip({ ...c, inside: undefined })),
-  };
+  const inner = host.children.filter((c) => c.inside);
+  const innerIds = new Set(inner.map((c) => c.id));
+  const root: Topic = withRanges(
+    { ...host, children: inner.map((c) => strip({ ...c, inside: undefined })) },
+    ranges(host, (id) => innerIds.has(id)),
+  );
   delete root.layout;
   delete root.innerLayout;
   delete root.inside;
@@ -143,7 +162,17 @@ export function writeBack(doc: MindMap, path: InnerPath, next: MindMap): MindMap
     if (host) kids = kids.map((k) => (k.inside ? k : { ...k, inside: true }));
     // Children the view hid: the outer ones of the host, the inner ones elsewhere.
     const hidden = (prev?.children ?? []).filter((c) => (host ? !c.inside : c.inside) && !shownNow.has(c.id));
-    const out: Topic = { ...t, children: host ? [...hidden, ...kids] : [...kids, ...hidden] };
+    // Boundaries and summaries over hidden children stay as they were.
+    const hiddenIds = new Set(hidden.map((c) => c.id));
+    const kept = prev ? ranges(prev, (id) => hiddenIds.has(id)) : {};
+    const merged = {
+      boundaries: [...(t.boundaries ?? []), ...(kept.boundaries ?? [])],
+      summaries: [...(t.summaries ?? []), ...(kept.summaries ?? [])],
+    };
+    const out: Topic = withRanges(
+      { ...t, children: host ? [...hidden, ...kids] : [...kids, ...hidden] },
+      { boundaries: merged.boundaries.length ? merged.boundaries : undefined, summaries: merged.summaries.length ? merged.summaries : undefined },
+    );
     delete out.innerSize;
     return out;
   };
@@ -181,6 +210,11 @@ export function writeBack(doc: MindMap, path: InnerPath, next: MindMap): MindMap
 export function innerPathTo(doc: MindMap, id: string): InnerPath | undefined {
   const walk = (t: Topic, path: InnerPath): InnerPath | undefined => {
     if (t.id === id) return path;
+    for (const s of t.summaries ?? []) {
+      if (s.topic.id !== id) continue;
+      const own = t.children.find((c) => c.id === s.from);
+      return own?.inside ? [...path, t.id] : path;
+    }
     for (const c of t.children) {
       const hit = walk(c, c.inside ? [...path, t.id] : path);
       if (hit) return hit;

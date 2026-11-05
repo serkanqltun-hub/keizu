@@ -127,3 +127,28 @@ export const Pencil = (p: P) => <Svg {...p}><path d="M4 20l1-4L16 5l3 3L8 19z" /
 export const LinkIcon = (p: P) => <Svg {...p}><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></Svg>;
 export const ShapeIcon = (p: P) => <Svg {...p}><rect x="3" y="7" width="12" height="10" rx="3" /><circle cx="17" cy="9" r="4" /></Svg>;
 export const RootIcon = (p: P) => <Svg {...p}><rect x="8" y="9" width="8" height="6" rx="2" /><path d="M12 9V4M12 20v-5M8 12H3M21 12h-5" /></Svg>;
+
+/** A dashed outline around two topics. */
+export const BoundaryIcon = (p: P) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="16" rx="4" strokeDasharray="3 2.5" />
+    <path d="M7.5 9.5h9M7.5 14.5h6" />
+  </Svg>
+);
+
+/** A curly bracket pointing at a topic. */
+export const SummaryIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 5h3M4 12h3M4 19h3" />
+    <path d="M9 4q2.5 0 2.5 2.5v3Q11.5 12 14 12q-2.5 0-2.5 2.5v3Q11.5 20 9 20" />
+    <rect x="15" y="10" width="6" height="4" rx="1.5" />
+  </Svg>
+);
+
+/** Focus mode: corner marks closing in on a topic. */
+export const FocusIcon = (p: P) => (
+  <Svg {...p}>
+    <path d="M4 9V5h4M16 5h4v4M20 15v4h-4M8 19H4v-4" />
+    <rect x="8.5" y="10" width="7" height="4" rx="1.5" />
+  </Svg>
+);
