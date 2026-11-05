@@ -1,7 +1,7 @@
 // Pure rendering of a laid-out map. Used both by the live canvas and by the
 // SVG/PNG exporters, so what you export is exactly what you see.
 
-import { NOTE_GAP, edgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
+import { NOTE_GAP, edgeShape, flowEdgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
 import { FLAG_COLORS, MARKER_GAP, MARKER_SIZE, PRIORITY_COLORS } from '../core/markers';
 import type { MindMap } from '../core/model';
 import { deepen, tint, type Theme } from '../core/themes';
@@ -223,6 +223,7 @@ export function CollapseBadge({ b, theme }: { b: NodeBox; theme: Theme }) {
 
 function Relations({ map, layout, theme, selectedRelId }: { map: MindMap; layout: MapLayout; theme: Theme; selectedRelId?: string }) {
   const base = theme.dark ? '#9AA1AB' : '#6B7480';
+  const routed = new Set(layout.flowEdges.map((f) => f.relId).filter(Boolean));
   return (
     <g>
       <defs>
@@ -234,6 +235,7 @@ function Relations({ map, layout, theme, selectedRelId }: { map: MindMap; layout
         </marker>
       </defs>
       {map.relations.map((r) => {
+        if (routed.has(r.id)) return null; // drawn as a flow chart arrow
         const a = layout.byId.get(r.from), b = layout.byId.get(r.to);
         if (!a || !b) return null; // hidden inside a collapsed branch
         const { d, mid } = relationPath(a, b);
@@ -268,7 +270,8 @@ function Relations({ map, layout, theme, selectedRelId }: { map: MindMap; layout
 
 /** Words on connectors (Topic.linkLabel), as in concept maps. */
 function LinkLabels({ map, layout, edges, theme }: { map: MindMap; layout: MapLayout; edges: NodeBox[]; theme: Theme }) {
-  const labelled = edges.filter((c) => c.topic.linkLabel && !c.noEdge);
+  // Flow chart connectors carry their words themselves (FlowArrows).
+  const labelled = edges.filter((c) => c.topic.linkLabel && !c.noEdge && c.flow !== 'flow');
   if (!labelled.length) return null;
   return (
     <g>
@@ -283,6 +286,47 @@ function LinkLabels({ map, layout, edges, theme }: { map: MindMap; layout: MapLa
             <text x={mid.x} y={mid.y + 4} textAnchor="middle" fontSize={11} fontStyle="italic" fill={c.color} fontFamily={FONT}>
               {label}
             </text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+/**
+ * Flow chart arrows: tree connectors and flow links alike, with words on
+ * them (the topic's linkLabel or the link's label). Flow links can be
+ * selected like relations.
+ */
+function FlowArrows({ map, layout, theme, selectedRelId, dimIds, fade }: { map: MindMap; layout: MapLayout; theme: Theme; selectedRelId?: string; dimIds?: Set<string>; fade?: Map<string, number> }) {
+  if (!layout.flowEdges.length) return null;
+  const rels = new Map(map.relations.map((r) => [r.id, r]));
+  return (
+    <g data-flow-arrows="">
+      {layout.flowEdges.map((fe) => {
+        const shape = flowEdgeShape(fe, layout.byId);
+        if (!shape) return null;
+        const src = layout.byId.get(fe.from)!, dst = layout.byId.get(fe.to)!;
+        const on = !!fe.relId && fe.relId === selectedRelId;
+        // A tree connector takes the colour of the step it leads to; a link
+        // keeps the colour of the path it comes from.
+        const color = on ? SELECT_COLOR : fe.relId ? src.color : dst.color;
+        const label = fe.relId ? rels.get(fe.relId)?.label : dst.topic.linkLabel;
+        const opacity = (dimIds?.has(fe.to) || dimIds?.has(fe.from) ? 0.35 : 1) * Math.min(fade?.get(fe.to) ?? 1, fade?.get(fe.from) ?? 1);
+        const labelW = label ? label.length * 6.4 + 14 : 0;
+        return (
+          <g key={fe.key} opacity={opacity} data-relation-id={fe.relId} style={fe.relId ? { cursor: 'pointer' } : undefined}>
+            {fe.relId && <path d={shape.d} fill="none" stroke="transparent" strokeWidth={14} />}
+            <path d={shape.d} fill="none" stroke={color} strokeWidth={on ? 2.2 : theme.signature ? 1.6 : 2} strokeLinejoin="round" strokeLinecap="round" />
+            <path d={shape.head} fill={color} />
+            {label && (
+              <g>
+                <rect x={shape.mid.x - labelW / 2} y={shape.mid.y - 10} width={labelW} height={20} rx={10} fill={theme.canvas} stroke={on ? SELECT_COLOR : color} strokeOpacity={0.6} />
+                <text x={shape.mid.x} y={shape.mid.y + 4} textAnchor="middle" fontSize={11} fontWeight={600} fill={color} fontFamily={FONT}>
+                  {label}
+                </text>
+              </g>
+            )}
           </g>
         );
       })}
@@ -315,7 +359,7 @@ export function MapSvg({ map, layout, theme, selectedId, selectedIds, selectedRe
     <g>
       <g fill="none" strokeLinecap="round">
         {vis.edges.map((c) => {
-          if (c.noEdge) return null;
+          if (c.noEdge || c.flow === 'flow') return null;
           const p = layout.byId.get(c.parentId!)!;
           const { d } = edgeShape(p, c, map.branchStyle);
           const main = c.depth === 1 || p.flow === 'fishbone';
@@ -323,6 +367,7 @@ export function MapSvg({ map, layout, theme, selectedId, selectedIds, selectedRe
           return <path key={c.id} d={d} stroke={c.color} strokeWidth={width} strokeLinejoin="round" opacity={(dimIds?.has(c.id) ? 0.35 : 1) * (fade?.get(c.id) ?? 1)} />;
         })}
       </g>
+      <FlowArrows map={map} layout={layout} theme={theme} selectedRelId={selectedRelId} dimIds={dimIds} fade={fade} />
       <LinkLabels map={map} layout={layout} edges={vis.edges} theme={theme} />
       {vis.nodes.map((b) => (
         <TopicView key={b.id} b={b} theme={theme} selected={isSel(b.id)} dimmed={dimIds?.has(b.id)} opacity={fade?.get(b.id) ?? 1} />
@@ -343,11 +388,19 @@ export function MapSvg({ map, layout, theme, selectedId, selectedIds, selectedRe
 function SimpleMap({ map, layout, theme, nodes, edges, isSel }: { map: MindMap; layout: MapLayout; theme: Theme; nodes: NodeBox[]; edges: NodeBox[]; isSel(id: string): boolean }) {
   const edgeD = new Map<string, string[]>();
   for (const c of edges) {
-    if (c.noEdge) continue;
+    if (c.noEdge || c.flow === 'flow') continue;
     const p = layout.byId.get(c.parentId!)!;
     const list = edgeD.get(c.color) ?? [];
     list.push(edgeShape(p, c, map.branchStyle).d);
     edgeD.set(c.color, list);
+  }
+  for (const fe of layout.flowEdges) {
+    const shape = flowEdgeShape(fe, layout.byId);
+    const color = layout.byId.get(fe.to)?.color;
+    if (!shape || !color) continue;
+    const list = edgeD.get(color) ?? [];
+    list.push(shape.d);
+    edgeD.set(color, list);
   }
   const fillD = new Map<string, string[]>();
   for (const b of nodes) {

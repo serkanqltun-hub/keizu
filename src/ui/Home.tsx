@@ -102,6 +102,21 @@ const TEMPLATES: { layout: LayoutKind; svg: JSX.Element }[] = [
       </svg>
     ),
   },
+  {
+    layout: 'flow',
+    svg: (
+      <svg width="96" height="56" viewBox="0 0 96 56" fill="none" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <rect x="2" y="23" width="16" height="10" rx="3" fill="#1F2A37" />
+        <path d="M18 28h5M23 10v36M23 10h6M23 28h6M23 46h6M47 10h4v18h4M47 28h8M47 46h4V28" stroke="#2F9E44" />
+        <rect x="29" y="5" width="18" height="10" rx="3" stroke="#2F9E44" />
+        <rect x="29" y="23" width="18" height="10" rx="3" stroke="#2F9E44" />
+        <rect x="29" y="41" width="18" height="10" rx="3" stroke="#2F9E44" />
+        <rect x="55" y="23" width="16" height="10" rx="3" fill="#EBFBEE" stroke="#2F9E44" />
+        <path d="M71 28h7" stroke="#2F9E44" />
+        <rect x="78" y="23" width="16" height="10" rx="3" fill="#1F2A37" />
+      </svg>
+    ),
+  },
 ];
 
 function when(iso: string): string {
@@ -236,6 +251,11 @@ export function Home({ store, onOpen, onOpenShared, onSettings, onOpenFiles, not
       matrix: t('tpl.matrix'),
       column: t('tpl.column'),
       cell: t('tpl.cell'),
+      flowStart: t('tpl.flowStart'),
+      flowPath: t('tpl.flowPath'),
+      flowStep: t('tpl.flowStep'),
+      flowMeet: t('tpl.flowMeet'),
+      flowEnd: t('tpl.flowEnd'),
     });
     map.theme = defaultThemeId(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
     await store.save(map);

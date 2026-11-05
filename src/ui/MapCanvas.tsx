@@ -55,7 +55,8 @@ interface Props {
   onStartEdit(id: string): void;
   onCommitEdit(id: string, text: string): void;
   onCancelEdit(): void;
-  onMove(id: string, parentId: string): void;
+  /** `merge`: flow charts, the dragged step's path continues to the target. */
+  onMove(id: string, parentId: string, merge?: boolean): void;
   onToggleCollapse(id: string): void;
   onZoomChange(k: number): void;
   /** Right click (or a long press) on a topic, a relation or empty canvas. */
@@ -125,7 +126,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     return () => ro.disconnect();
   }, []);
 
-  const [drag, setDrag] = useState<{ id: string; x: number; y: number; target: string | null; group: string[] | null } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; x: number; y: number; target: string | null; shift?: boolean; group: string[] | null } | null>(null);
   // Selection box being drawn (map coordinates).
   const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [pointer, setPointer] = useState<Point | null>(null);
@@ -486,7 +487,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     // Roots keep their grab offset; other topics are carried by the pointer.
     const root = isRoot(map, g.id);
     const x = root ? p.x - g.ox : p.x, y = root ? p.y - g.oy : p.y;
-    setDrag({ id: g.id, x, y, target: hitTest(p.x, p.y, exclude)?.id ?? null, group: g.group });
+    setDrag({ id: g.id, x, y, target: hitTest(p.x, p.y, exclude)?.id ?? null, shift: e.shiftKey, group: g.group });
   };
 
   const onPointerUp = () => {
@@ -518,11 +519,12 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     if (g?.kind === 'topic' && g.dragging && drag) {
       // Dropped on a topic: becomes its child. Dropped on empty canvas:
       // becomes (or stays) a free-floating tree at that spot.
+      // Several selected topics always move (merging paths is one at a time).
       const from = layout.byId.get(g.id);
       if (drag.group) {
         if (drag.target) props.onMoveMany?.(drag.group, drag.target);
         else if (from) props.onFloatMany?.(drag.group, { x: drag.x - from.x, y: drag.y - from.y });
-      } else if (drag.target) props.onMove(g.id, drag.target);
+      } else if (drag.target) props.onMove(g.id, drag.target, mergeDrop);
       else props.onFloat(g.id, { x: Math.round(drag.x), y: Math.round(drag.y) });
     }
     setDrag(null);
@@ -557,6 +559,9 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   const drawn = useLayoutMotion(layout, map.id);
   const dragBox = drag ? layout.byId.get(drag.id) : undefined;
   const targetBox = drag?.target ? layout.byId.get(drag.target) : undefined;
+  // Flow charts: dropping a step on another merges the paths (Shift moves it).
+  const flowDrop = !!targetBox && targetBox.layout === 'flow' && layout.byId.get(drag!.id)?.layout === 'flow';
+  const mergeDrop = flowDrop && !drag?.shift && !drag?.group;
   const editBox = editingId ? layout.byId.get(editingId) : undefined;
   const noteBox = props.noteId && !editingId ? layout.byId.get(props.noteId) : undefined;
 
@@ -635,6 +640,21 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
               strokeWidth={2}
               strokeDasharray="6 4"
             />
+          )}
+          {targetBox && flowDrop && (
+            <g style={{ pointerEvents: 'none' }} data-drop-hint="">
+              {(() => {
+                const label = t(mergeDrop ? 'drop.merge' : 'drop.move');
+                const w = label.length * 6.2 + 20;
+                const y = targetBox.y - targetBox.h / 2 - 34;
+                return (
+                  <>
+                    <rect x={targetBox.x - w / 2} y={y} width={w} height={22} rx={11} fill={SELECT_COLOR} />
+                    <text x={targetBox.x} y={y + 15} textAnchor="middle" fontSize={11.5} fontWeight={600} fill="#fff" fontFamily="'Plus Jakarta Sans', system-ui, sans-serif">{label}</text>
+                  </>
+                );
+              })()}
+            </g>
           )}
           {drag && dragBox && (
             <g opacity={0.85} style={{ pointerEvents: 'none' }}>

@@ -8,6 +8,7 @@ import { templateMap, type TemplateLabels } from './templates';
 const labels: TemplateLabels = {
   central: 'C', main: 'M', concept: 'K', conceptLink: 'has', timeline: 'T', event: 'E', detail: 'D',
   fishbone: 'F', cause: 'N', subcause: 'S', matrix: 'X', column: 'Col', cell: 'Cell',
+  flowStart: 'Start', flowPath: 'P', flowStep: 'Step', flowMeet: 'Meet', flowEnd: 'End',
 };
 
 function overlaps(m: MindMap): string[] {

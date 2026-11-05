@@ -71,6 +71,7 @@ export const Search = (p: P) => <Svg {...p}><circle cx="11" cy="11" r="6" /><pat
 export const Import = (p: P) => <Svg {...p}><path d="M12 3v12M8 11l4 4 4-4" /><path d="M5 13v7h14v-7" /></Svg>;
 export const Check = (p: P) => <Svg {...p}><path d="M5 12.5l4.5 4.5L19 7.5" /></Svg>;
 export const Keyboard = (p: P) => <Svg {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></Svg>;
+export const MergeIcon = (p: P) => <Svg {...p}><path d="M4 6h5c3 0 4 6 7 6h4M4 18h5c3 0 4-6 7-6" /><path d="M17 9l3 3-3 3" /></Svg>;
 export const RelationIcon = (p: P) => <Svg {...p}><path d="M4 19C4 8 20 16 20 5" /><path d="M16.5 4.5L20 5l.5 3.5" /></Svg>;
 export const FloatingIcon = (p: P) => <Svg {...p}><rect x="3" y="4" width="9" height="6" rx="2" /><rect x="12" y="14" width="9" height="6" rx="2" strokeDasharray="2.5 2" /></Svg>;
 export const Save = (p: P) => <Svg {...p}><path d="M5 4h11l3 3v13H5z" /><path d="M8 4v5h7V4M8 20v-6h8v6" /></Svg>;
