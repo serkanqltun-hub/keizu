@@ -48,6 +48,8 @@ import {
 } from '../core/model';
 import { applyStyle, copyableStyle, documentOrder, floatTopics, moveTopics, pasteTopics, removeTopics, setCollapsed, setLayouts, setMarker, topLevel, updateStyles } from '../core/bulk';
 import { parsePastedText, topicsToText } from '../core/smartPaste';
+import { allTags, checkTask, emptyFilter, extractTags, filterActive, filterMap, matchingIds, setTag, setTaskFields, toggleTasks, type TaskPatch, type TopicFilter } from '../core/tasks';
+import { FilterBar, TaskTagSection, TasksPane } from './TaskPanel';
 import { FILL_SWATCHES, getTheme } from '../core/themes';
 import {
   addInner,
@@ -199,7 +201,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     setOutlineOpenState(v);
     writePref('kz.outlinePanel', v);
   };
-  const [panelTab, setPanelTab] = useState<'style' | 'map'>('style');
+  const [panelTab, setPanelTab] = useState<'style' | 'map' | 'tasks'>('style');
+  // Tag / task filter: a view setting of this editor, never saved in the map.
+  const [filter, setFilter] = useState<TopicFilter | null>(null);
   const [zoom, setZoom] = useState(1);
   const [saved, setSaved] = useState<'saved' | 'saving'>('saved');
   const [exportOpen, setExportOpen] = useState(false);
@@ -241,10 +245,35 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const [focus, setFocus] = useState<FocusOptions | null>(null);
   const theme = getTheme(map.theme);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const layout = useMemo(() => layoutMap(map, canvasMeasure, focus ?? undefined), [map, fontsReady, focus]);
+  const filtering = filterActive(filter);
+  // "Hide" filtering lays out only matching topics (and the way to them).
+  const shownMap = useMemo(() => (filtering && filter.mode === 'hide' ? filterMap(map, filter) : map), [map, filter, filtering]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const layout = useMemo(() => layoutMap(shownMap, canvasMeasure, focus ?? undefined), [shownMap, fontsReady, focus]);
   // The whole map's layout: the same one outside focus mode.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const fullLayout = useMemo(() => (focus ? layoutMap(map, canvasMeasure) : layout), [map, fontsReady, focus, layout]);
+  const fullLayout = useMemo(() => (focus ? layoutMap(shownMap, canvasMeasure) : layout), [shownMap, fontsReady, focus, layout]);
+  const matched = useMemo(() => (filtering ? matchingIds(map, filter) : undefined), [map, filter, filtering]);
+  /** Topics the "dim" filter fades. */
+  const filterDim = useMemo(() => {
+    if (!matched || filter?.mode !== 'dim') return undefined;
+    const out = new Set<string>();
+    for (const b of layout.nodes) if (!matched.has(b.id)) out.add(b.id);
+    return out;
+  }, [matched, filter, layout]);
+  const mapTags = useMemo(() => allTags(map), [map]);
+  const taskCount = useMemo(() => {
+    let all = 0, done = 0;
+    const walk = (tp: Topic) => {
+      if (tp.task) {
+        all++;
+        if (tp.task === 'done') done++;
+      }
+      tp.children.forEach(walk);
+    };
+    doc.roots.forEach(walk);
+    return { all, done };
+  }, [doc]);
   const selected = selectedId ? findTopic(map, selectedId) : undefined;
   /** The selected topic is a step of a flow chart. */
   const inFlow = !!selectedId && layout.byId.get(selectedId)?.layout === 'flow';
@@ -945,6 +974,44 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     if (view === 'map' && area) setCtx({ x: area.left + area.width / 2, y: area.top + area.height / 2, target: { kind: 'canvas', pos: { x: 0, y: (layout.bounds.maxY ?? 0) + 120 } }, kb: true });
   };
 
+  // ---- task mode and tags (act on every selected topic) ----
+  const taskTargets = () => (multi ? selectedIds : selectedId ? [selectedId] : []);
+  const toggleTask = () => {
+    const ids = taskTargets();
+    if (ids.length) commit(toggleTasks(map, ids));
+  };
+  const patchTask = (p: TaskPatch) => commit(setTaskFields(map, taskTargets(), p));
+  const tagTopics = (tag: string, on: boolean) => commit(setTag(map, taskTargets(), tag, on));
+  const setPriority = (n: number | undefined) => {
+    const ids = taskTargets();
+    if (n) return commit(setMarker(map, ids, `priority-${n}`, true));
+    let next = map;
+    for (const id of ids) {
+      const m = findTopic(next, id)?.markers?.find((x) => x.startsWith('priority-'));
+      if (m) next = setMarker(next, [id], m, false);
+    }
+    commit(next);
+  };
+  const openTagInput = () => {
+    setPanelOpen(true);
+    setHistoryOpen(false);
+    setPanelTab('style');
+    setTimeout(() => document.getElementById('tag-input')?.focus(), 0);
+  };
+  const openTasks = () => {
+    setPanelOpen(true);
+    setHistoryOpen(false);
+    setPanelTab('tasks');
+  };
+  const toggleFilter = () => setFilter((f) => (f ? null : { ...emptyFilter }));
+  /** A tag chip on the map: filter by it (again: stop filtering by it). */
+  const filterByTag = (tag: string) =>
+    setFilter((f) => {
+      const cur = f ?? { ...emptyFilter };
+      const has = cur.tags.some((x) => x.toLowerCase() === tag.toLowerCase());
+      return { ...cur, tags: has ? cur.tags.filter((x) => x.toLowerCase() !== tag.toLowerCase()) : [...cur.tags, tag] };
+    });
+
   const topicMenu = (id: string): CtxItem[] => {
     const tp = findTopic(map, id);
     if (!tp) return [];
@@ -1048,6 +1115,22 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           setHistoryOpen(false);
           setPanelTab('style');
         },
+      },
+      item('task', toggleTask, { label: !tp.task ? t('task.make') : tp.task === 'todo' ? t('task.check') : t('task.uncheck'), icon: <I.TaskIcon size={16} /> }),
+      !!tp.task && { type: 'item', id: 'taskRemove', label: t('task.remove'), icon: <I.TaskIcon size={16} />, run: () => patchTask({ task: null }) },
+      {
+        type: 'sub',
+        id: 'tags',
+        label: t('tag.section'),
+        icon: <I.TagIcon size={16} />,
+        items: [
+          ...mapTags.slice(0, 12).map<CtxItem>(({ tag }) => {
+            const on = !!tp.tags?.some((x) => x.toLowerCase() === tag.toLowerCase());
+            return { type: 'item', id: `tag-${tag}`, label: `#${tag}`, checked: on, run: () => tagTopics(tag, !on) };
+          }),
+          ...(mapTags.length ? [{ type: 'sep' } as CtxItem] : []),
+          { type: 'item', id: 'newTag', label: t('tag.new'), run: openTagInput },
+        ],
       },
       item('formatPainter', () => actions.painter(), { label: t('tb.painter'), icon: <I.BrushIcon size={16} /> }),
       copiedStyle && item('pasteStyle', actions.pasteStyle, { icon: <I.BrushIcon size={16} /> }),
@@ -1223,6 +1306,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       enabled: !!selected && !selectedHasInner && selectedId !== mainId && !readOnly,
     },
     insertMap: { run: () => setInsertOpen(true), enabled: !readOnly },
+    task: { run: toggleTask, enabled: !!selectedId && !readOnly },
+    tag: { run: openTagInput, enabled: !!selectedId && !readOnly },
+    filter: { run: toggleFilter },
+    tasks: { run: openTasks },
   };
 
   // Keyboard shortcuts (inactive while typing in a field or a dialog is open).
@@ -1260,6 +1347,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           setPainter(null);
           setToast(null);
         } else if (relationFrom) setRelationFrom(null);
+        else if (filter) setFilter(null);
         else if (focused) exitFocus();
         else if (path.length) exitInner();
         else selectTopic(null), setSelectedRelId(null), setSelectedBoundaryId(null);
@@ -1332,6 +1420,12 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     setEditSeed(null);
     const tp = findTopic(map, id);
     const clean = text.replace(/\s+$/g, '');
+    // "#tag" words typed at the end become the topic's tags.
+    const ex = extractTags(clean);
+    if (tp && ex.tags.length) {
+      commit(ex.tags.reduce((m, tag) => setTag(m, [id], tag, true), updateTopic(map, id, { text: ex.text })));
+      return;
+    }
     if (tp && clean && clean !== tp.text) commit(updateTopic(map, id, { text: clean }));
   };
   const cancelEdit = () => {
@@ -1405,6 +1499,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onCancelEdit={cancelEdit}
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
               onContextMenu={(id, x, y) => openMenu({ kind: 'topic', id }, x, y)}
+              onCheckTask={readOnly ? undefined : (id) => commit(checkTask(map, id))}
             />
           </div>
           <button className="op-foot" onClick={() => setPaletteOpen(true)}>
@@ -1467,6 +1562,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
             <I.BrushIcon />{t('tb.painter')}
           </button>
           <button className="tb" title={t('tb.noteTip')} disabled={!selectedId} onClick={actions.note}><I.NoteIcon />{t('tb.note')}</button>
+          <button className={`tb ${selected?.task ? 'on' : ''}`} aria-pressed={!!selected?.task} title={tip('task', t('tb.taskTip'))} disabled={!selectedId} onClick={toggleTask}><I.TaskIcon />{t('tb.task')}</button>
           {selected?.image ? (
             <button className="tb" title={t('tb.removeImageTip')} onClick={() => selectedId && commit(removeTopicImage(map, selectedId))}><I.ImageIcon />{t('tb.removeImage')}</button>
           ) : (
@@ -1502,6 +1598,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           >
             <I.NotebookIcon />{t('tb.notebook')}
           </button>
+          <button className={`tb ${filter ? 'on' : ''}`} aria-pressed={!!filter} title={tip('filter', t('tb.filterTip'))} onClick={toggleFilter}><I.FilterIcon />{t('tb.filter')}</button>
         </nav>
         )}
 
@@ -1631,6 +1728,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onZoomChange={setZoom}
               onOpenLink={(id) => actions.openLink(id)}
               onContextMenu={openMenu}
+              onCheckTask={(id) => commit(checkTask(map, id))}
+              onTagClick={filterByTag}
+              filterDim={filterDim}
               noteId={noteId}
               onOpenNote={setNoteId}
               onCloseNote={() => setNoteId(null)}
@@ -1657,6 +1757,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onCancelEdit={cancelEdit}
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
               onContextMenu={(id, x, y) => openMenu({ kind: 'topic', id }, x, y)}
+              onCheckTask={readOnly ? undefined : (id) => commit(checkTask(map, id))}
             />
           )}
           {path.length > 0 && (
@@ -1704,6 +1805,15 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               </button>
             </nav>
           )}
+          {filter && (
+            <FilterBar
+              tags={mapTags}
+              filter={filter}
+              matches={matched?.size}
+              onChange={setFilter}
+              onClose={() => setFilter(null)}
+            />
+          )}
           {view === 'map' && (
             <div className="zoom">
               <button className="ib" aria-label={cmdLabel('zoomOut')} title={tip('zoomOut')} onClick={() => canvas.current?.zoomBy(1 / 1.2)}><I.Minus size={16} /></button>
@@ -1723,6 +1833,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         </span>
         <span>{t('status.topics', { n: countAll(map) })}</span>
         <span>{t('status.relations', { n: map.relations.length })}</span>
+        {taskCount.all > 0 && (
+          <button className="sb-tasks" title={cmdLabel('tasks')} onClick={openTasks}>{t('status.tasks', taskCount)}</button>
+        )}
+        {filtering && <span className="sb-sel">{t('status.filter')}</span>}
         {multi && <span className="sb-sel">{t('status.selected', { n: selectedIds.length })}</span>}
         {live.peers.length > 0 && <span>{t('live.peers', { n: live.peers.length })}</span>}
         <span>{layoutName(map.layout)}</span>
@@ -1773,6 +1887,32 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
             onHref={(h) => selectedId && commit(updateTopic(map, selectedId, { href: h || undefined }))}
             maps={libraryMaps}
             onMap={(p) => commit(setMapProps(map, p))}
+            topicTop={
+              selected ? (
+                <TaskTagSection
+                  key={`tt-${selected.id}`}
+                  topic={selected}
+                  count={selectedIds.length}
+                  tags={mapTags.map((x) => x.tag)}
+                  onTask={patchTask}
+                  onTag={tagTopics}
+                  onPriority={setPriority}
+                />
+              ) : undefined
+            }
+            tasksPane={
+              <TasksPane
+                doc={doc}
+                store={shared ? undefined : store}
+                readOnly={readOnly}
+                onGo={goTo}
+                onOpenMap={(mapId, topicId) => onOpenMap(mapId, topicId)}
+                onCheck={(id) => {
+                  if (readOnlyRef.current) return;
+                  setHist((h) => push(h, checkTask(h.present, id)));
+                }}
+              />
+            }
             topicExtra={
               selected && selectedId !== mainId ? (
                 <section>

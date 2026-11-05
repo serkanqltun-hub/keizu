@@ -5,6 +5,7 @@
 // topics pasted into another app read as a Markdown list.
 
 import { createTopic, type Topic } from './model';
+import { applyParsed, metaSuffix, parseTaskText, taskBox } from './tasks';
 
 const URL_RE = /^(https?:\/\/|www\.)[^\s<>"]+$/i;
 
@@ -103,9 +104,11 @@ export function parsePastedText(input: string): Topic[] {
     }
     const { text, href } = cleanInline(line.text);
     if (!text) continue;
-    const topic = createTopic(text);
+    // "[ ]" boxes are tasks; "#tags", "📅 date" and "@person" after the text
+    // (as Keizu copies them) go back into their fields.
+    const parsed = parseTaskText(line.done === undefined ? text : `[${line.done ? 'x' : ' '}] ${text}`);
+    const topic = applyParsed(createTopic(text), parsed);
     if (href) topic.href = normalizeUrl(href);
-    if (line.done !== undefined) topic.markers = [line.done ? 'task-100' : 'task-0'];
     while (stack.length && stack[stack.length - 1].rank >= line.rank) stack.pop();
     if (stack.length) stack[stack.length - 1].topic.children.push(topic);
     else tops.push(topic);
@@ -121,12 +124,12 @@ export function topicsToText(topics: Topic[]): string {
   const walk = (t: Topic, depth: number) => {
     const pad = '  '.repeat(depth);
     const text = t.text.replace(/\s*\n\s*/g, ' ');
-    out.push(`${pad}- ${t.href && !t.href.startsWith('keizu:') && t.href !== text ? `[${text}](${t.href})` : text}`);
+    out.push(`${pad}- ${taskBox(t)}${t.href && !t.href.startsWith('keizu:') && t.href !== text ? `[${text}](${t.href})` : text}${metaSuffix(t)}`);
     if (t.note) for (const l of t.note.split('\n')) out.push(`${pad}  > ${l}`);
     t.children.forEach((c) => walk(c, depth + 1));
   };
   // A single topic with no children copies as plain text.
-  if (topics.length === 1 && !topics[0].children.length && !topics[0].note) return topics[0].text;
+  if (topics.length === 1 && !topics[0].children.length && !topics[0].note && !topics[0].task && !topics[0].tags) return topics[0].text;
   topics.forEach((t) => walk(t, 0));
   return out.join('\n');
 }

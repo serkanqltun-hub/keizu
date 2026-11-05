@@ -152,3 +152,12 @@ export const FocusIcon = (p: P) => (
     <rect x="8.5" y="10" width="7" height="4" rx="1.5" />
   </Svg>
 );
+
+/** Task mode: a checked box. */
+export const TaskIcon = (p: P) => <Svg {...p}><rect x="4" y="4" width="16" height="16" rx="4" /><path d="M8 12.5l3 3 5-6" /></Svg>;
+/** Filter: a funnel. */
+export const FilterIcon = (p: P) => <Svg {...p}><path d="M4 5h16l-6 7.5V19l-4-2v-4.5z" /></Svg>;
+/** A tag. */
+export const TagIcon = (p: P) => <Svg {...p}><path d="M3.5 12.5V4h8.5l8.5 8.5-8 8z" /><circle cx="8" cy="8.5" r="1.5" /></Svg>;
+/** The task list: lines with boxes. */
+export const TaskListIcon = (p: P) => <Svg {...p}><rect x="3.5" y="5" width="4" height="4" rx="1" /><rect x="3.5" y="15" width="4" height="4" rx="1" /><path d="M11 7h9M11 17h9" /></Svg>;

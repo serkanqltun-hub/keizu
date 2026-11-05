@@ -7,7 +7,7 @@
 
 import type { MindMap, Relation, Topic } from '../core/model';
 
-const TOPIC_FIELDS = ['text', 'image', 'pos', 'layout', 'note', 'markers', 'collapsed', 'style', 'linkLabel', 'href', 'boundaries', 'summaries'] as const;
+const TOPIC_FIELDS = ['text', 'image', 'pos', 'layout', 'note', 'markers', 'collapsed', 'style', 'linkLabel', 'href', 'boundaries', 'summaries', 'tags', 'task', 'due', 'assignee', 'inside', 'innerLayout', 'innerKind'] as const;
 const MAP_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor', 'notebook'] as const;
 const ROOT = '\u0000root';
 

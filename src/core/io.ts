@@ -1,6 +1,7 @@
 // Import / export of formats that don't need a browser.
 
 import { createTopic, isMindMap, newId, normalizeMap, rangeIndices, type MindMap, type Topic } from './model';
+import { applyParsed, metaSuffix, normalizeTag, parseTaskText, taskBox } from './tasks';
 import { child, childrenNamed, escapeXml, parseXml, type XmlNode } from './xml';
 
 export function toJSON(map: MindMap): string {
@@ -18,16 +19,23 @@ export function fromJSON(text: string): MindMap {
   return normalizeMap(data);
 }
 
-/** Central topic as a heading, everything else as a nested list. Notes are "> " quotes under their topic. */
+/** One line of text for a topic: task box, text, then tags, date and person. */
+const lineOf = (t: Topic) => `${taskBox(t)}${t.text.replace(/\n/g, ' ')}${metaSuffix(t)}`;
+
+/**
+ * Central topic as a heading, everything else as a nested list. Notes are
+ * "> " quotes under their topic; tasks are "[ ]" / "[x]" items with "#tags",
+ * "📅 date" and "@person" after the text.
+ */
 export function toMarkdown(map: MindMap): string {
-  const out: string[] = [`# ${map.roots[0].text.replace(/\n/g, ' ')}`, ''];
+  const out: string[] = [`# ${lineOf(map.roots[0])}`, ''];
   const rootNote = (t: Topic) => {
     if (t.note) out.push(...t.note.split('\n').map((l) => `> ${l}`), '');
   };
   rootNote(map.roots[0]);
   const walk = (t: Topic, depth: number) => {
     const pad = '  '.repeat(depth);
-    out.push(`${pad}- ${t.text.replace(/\n/g, ' ')}`);
+    out.push(`${pad}- ${lineOf(t)}`);
     if (t.note) for (const line of t.note.split('\n')) out.push(`${pad}  > ${line}`);
     walkChildren(t, depth + 1);
   };
@@ -40,13 +48,13 @@ export function toMarkdown(map: MindMap): string {
     }
     t.children.forEach((c, i) => {
       walk(c, depth);
-      for (const s of ends.get(i) ?? []) out.push(`${'  '.repeat(depth)}- » ${s.text.replace(/\n/g, ' ')}`);
+      for (const s of ends.get(i) ?? []) out.push(`${'  '.repeat(depth)}- » ${lineOf(s)}`);
     });
   };
   walkChildren(map.roots[0], 0);
   // Floating topics follow as their own sections.
   for (const r of map.roots.slice(1)) {
-    out.push('', `## ${r.text.replace(/\n/g, ' ')}`, '');
+    out.push('', `## ${lineOf(r)}`, '');
     rootNote(r);
     walkChildren(r, 0);
   }
@@ -66,8 +74,12 @@ export function toOPML(map: MindMap): string {
   ];
   const walk = (t: Topic, depth: number) => {
     const pad = '  '.repeat(depth);
-    const note = t.note ? ` _note="${escapeXml(t.note)}"` : '';
-    const open = `${pad}<outline text="${escapeXml(t.text)}"${note}`;
+    let extra = t.note ? ` _note="${escapeXml(t.note)}"` : '';
+    if (t.tags?.length) extra += ` _tags="${escapeXml(t.tags.join(','))}"`;
+    if (t.task) extra += ` _status="${t.task === 'done' ? 'checked' : 'unchecked'}"`;
+    if (t.due) extra += ` _due="${t.due}"`;
+    if (t.assignee) extra += ` _assignee="${escapeXml(t.assignee)}"`;
+    const open = `${pad}<outline text="${escapeXml(t.text)}"${extra}`;
     if (!t.children.length) return void out.push(`${open}/>`);
     out.push(`${open}>`);
     t.children.forEach((c) => walk(c, depth + 1));
@@ -93,6 +105,12 @@ export function fromOPML(text: string, fallbackTitle = 'İçe aktarılan'): Mind
     const t = createTopic((o.attrs.text ?? o.attrs.title ?? '').trim() || 'Konu', childrenNamed(o, 'outline').map(convert));
     const note = o.attrs._note?.trim();
     if (note) t.note = note;
+    const tags = (o.attrs._tags ?? '').split(',').map(normalizeTag).filter(Boolean);
+    if (tags.length) t.tags = tags;
+    const st = o.attrs._status;
+    if (st === 'checked' || st === 'unchecked') t.task = st === 'checked' ? 'done' : 'todo';
+    if (t.task && /^\d{4}-\d{2}-\d{2}$/.test(o.attrs._due ?? '')) t.due = o.attrs._due;
+    if (t.task && o.attrs._assignee?.trim()) t.assignee = o.attrs._assignee.trim();
     return t;
   };
   const tops = body ? childrenNamed(body, 'outline').map(convert) : [];
@@ -144,15 +162,16 @@ export function fromMarkdown(text: string, fallbackTitle = 'İçe aktarılan'): 
     }
     const h = /^(#{1,6})\s+(.*)$/.exec(raw);
     if (h) {
-      const title = h[2].trim();
+      const parsed = parseTaskText(h[2].trim());
+      const title = parsed.text;
       if (!mainNamed && main.children.length === 0) {
-        main.text = title;
+        applyParsed(main, parsed);
         mainNamed = true;
         noteFor = main;
         continue;
       }
       // Later headings become free-floating topics.
-      const floating = createTopic(title);
+      const floating = applyParsed(createTopic(title), parsed);
       roots.push(floating);
       stack = [{ indent: -1, topic: floating }];
       noteFor = floating;
@@ -165,7 +184,7 @@ export function fromMarkdown(text: string, fallbackTitle = 'İçe aktarılan'): 
       continue;
     }
     const indent = m[1].replace(/\t/g, '  ').length;
-    const topic = createTopic(m[2].trim());
+    const topic = applyParsed(createTopic(''), parseTaskText(m[2].trim()));
     while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
     stack[stack.length - 1].topic.children.push(topic);
     stack.push({ indent, topic });

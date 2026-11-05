@@ -1,9 +1,10 @@
 // Pure rendering of a laid-out map. Used both by the live canvas and by the
 // SVG/PNG exporters, so what you export is exactly what you see.
 
-import { BOUNDARY_LABEL_H, BOUNDARY_PAD, BRACKET_GAP, BRACKET_W, NOTE_GAP, edgeShape, flowEdgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
+import { BOUNDARY_LABEL_H, BOUNDARY_PAD, BRACKET_GAP, BRACKET_W, META_BAR_W, META_CHIP_H, META_FONT, META_ICON_W, NOTE_GAP, edgeShape, flowEdgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
 import { FLAG_COLORS, MARKER_GAP, MARKER_SIZE, PRIORITY_COLORS } from '../core/markers';
 import type { MindMap } from '../core/model';
+import { isOverdue, tagColor, today } from '../core/tasks';
 import { deepen, tint, type Theme } from '../core/themes';
 import { visibleIn, type Rect } from '../core/viewport';
 
@@ -93,6 +94,77 @@ export function MarkerGlyph({ id, x, y }: { id: string; x: number; y: number }) 
   );
 }
 
+const DONE_COLOR = '#2B8A3E';
+const LATE_COLOR = '#E03131';
+
+/** A task's checkbox, left of its text. Clicking it checks the task. */
+export function TaskCheck({ x, y, done, color }: { x: number; y: number; done: boolean; color: string }) {
+  const s = MARKER_SIZE - 2;
+  return (
+    <g data-task-check="" style={{ cursor: 'pointer' }}>
+      <rect x={x + 1} y={y + 1} width={s} height={s} rx={4} fill={done ? DONE_COLOR : 'transparent'} stroke={done ? DONE_COLOR : color} strokeOpacity={done ? 1 : 0.7} strokeWidth={1.6} />
+      {done && <path d={`M${x + 5} ${y + 9.5}l3 3 5.5-6.5`} stroke="#fff" strokeWidth={2} fill="none" strokeLinecap="round" strokeLinejoin="round" />}
+    </g>
+  );
+}
+
+/** The row of progress, date, person and tag chips under a topic's text. */
+function MetaChips({ b, x, y, text, dark }: { b: NodeBox; x: number; y: number; text: string; /** The chips sit on a dark fill. */ dark: boolean }) {
+  const meta = b.meta!;
+  const late = isOverdue(b.topic, today());
+  const h = META_CHIP_H;
+  return (
+    <g data-meta-row="" fontFamily={FONT}>
+      {meta.chips.map((c, i) => {
+        const cx = x + c.x;
+        const ty = y + h / 2 + 3.6;
+        if (c.kind === 'tag') {
+          const col = tagColor(c.tag!);
+          return (
+            <g key={i} data-tag={c.tag} style={{ cursor: 'pointer' }}>
+              <rect x={cx} y={y} width={c.w} height={h} rx={h / 2} fill={dark ? '#FFFFFF' : col} fillOpacity={dark ? 0.9 : 0.13} />
+              <text x={cx + 6} y={ty} style={{ font: META_FONT }} fill={col}>{c.label}</text>
+            </g>
+          );
+        }
+        if (c.kind === 'progress') {
+          const full = c.ratio! >= 1;
+          const col = full && !dark ? DONE_COLOR : text;
+          return (
+            <g key={i} data-progress="">
+              <rect x={cx} y={y} width={c.w} height={h} rx={h / 2} fill={col} fillOpacity={0.1} />
+              <rect x={cx + 6} y={y + h / 2 - 2} width={META_BAR_W} height={4} rx={2} fill={col} fillOpacity={0.22} />
+              <rect x={cx + 6} y={y + h / 2 - 2} width={Math.max(c.ratio! > 0 ? 3 : 0, META_BAR_W * c.ratio!)} height={4} rx={2} fill={full && !dark ? DONE_COLOR : text} />
+              <text x={cx + 6 + META_BAR_W + 4} y={ty} style={{ font: META_FONT }} fill={col} fillOpacity={full ? 1 : 0.85}>{c.label}</text>
+            </g>
+          );
+        }
+        const col = c.kind === 'due' && late ? LATE_COLOR : text;
+        const ix = cx + 5, iy = y + h / 2;
+        return (
+          <g key={i} data-chip={c.kind}>
+            <rect x={cx} y={y} width={c.w} height={h} rx={h / 2} fill={col} fillOpacity={c.kind === 'due' && late ? 0.14 : 0.08} />
+            <g fill="none" stroke={col} strokeWidth={1.3} strokeLinecap="round" strokeLinejoin="round" opacity={0.85}>
+              {c.kind === 'due' ? (
+                <>
+                  <rect x={ix} y={iy - 4} width={9} height={8.5} rx={1.5} />
+                  <path d={`M${ix} ${iy - 1}h9M${ix + 2.5} ${iy - 5.5}v2M${ix + 6.5} ${iy - 5.5}v2`} />
+                </>
+              ) : (
+                <>
+                  <circle cx={ix + 4.5} cy={iy - 2} r={2.3} />
+                  <path d={`M${ix} ${iy + 4.8}c.6-2.6 2.3-3.8 4.5-3.8s3.9 1.2 4.5 3.8`} />
+                </>
+              )}
+            </g>
+            <text x={cx + 6 + META_ICON_W - 1} y={ty} style={{ font: META_FONT }} fill={col}>{c.label}</text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 function NoteGlyph({ x, y, color, note }: { x: number; y: number; color: string; note: string }) {
   return (
     <g fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" opacity={0.75} data-note-glyph="" style={{ cursor: 'pointer' }}>
@@ -130,12 +202,15 @@ export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: Node
   const stroke = b.depth === 0 || b.shape === 'underline' || b.shape === 'none' || (sig && !s.fill) ? 'none' : b.color;
   const strokeW = b.depth === 1 ? 2 : 1.25;
   const lead = b.lead ?? 0;
-  const textX = b.padX + lead + markers.length * (MARKER_SIZE + MARKER_GAP);
+  const task = b.topic.task;
+  const leftIcons = markers.length + (task ? 1 : 0);
+  const textX = b.padX + lead + leftIcons * (MARKER_SIZE + MARKER_GAP);
   const selColor = sig ? theme.text : SELECT_COLOR;
   const textBlockH = b.lines.length * b.lineHeight;
   // Text and icons sit below the picture (if any) and above a shown note.
   const nb = b.noteBlock;
-  const bodyH = b.h - b.imageH - (nb?.h ?? 0);
+  const meta = b.meta;
+  const bodyH = b.h - b.imageH - (meta?.h ?? 0) - (nb?.h ?? 0);
   const firstBaseline = b.imageH + (bodyH - textBlockH) / 2 + b.lineHeight / 2 + b.fontSize * 0.35;
   const iconY = b.imageH + (bodyH - MARKER_SIZE) / 2;
   const imgPad = b.image ? Math.min(b.padX, 8) : 0;
@@ -159,14 +234,15 @@ export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: Node
       <rect width={b.w} height={b.h} rx={rx} fill={fill} stroke={stroke} strokeWidth={stroke === 'none' ? 0 : strokeW} />
       {sig && b.depth === 0 && theme.rootDot && <circle cx={b.w - 12} cy={b.h - 12} r={3.5} fill={theme.rootDot} data-root-dot="" />}
       {lead > 0 && (
-        <circle cx={b.padX + 3.5} cy={b.imageH + (b.h - b.imageH - (b.noteBlock?.h ?? 0)) / 2} r={b.depth === 1 ? 4 : 3} fill={b.depth === 1 && !s.fill ? text : b.color} data-lead-dot="" />
+        <circle cx={b.padX + 3.5} cy={b.imageH + bodyH / 2} r={b.depth === 1 ? 4 : 3} fill={b.depth === 1 && !s.fill ? text : b.color} data-lead-dot="" />
       )}
       {b.shape === 'underline' && <path d={`M0 ${b.h}H${b.w}`} stroke={b.color} strokeWidth={1.5} strokeLinecap="round" />}
       {b.image && (
         <image href={b.image.href} x={(b.w - b.image.w) / 2} y={imgPad} width={b.image.w} height={b.image.h - imgPad} preserveAspectRatio="xMidYMid meet" />
       )}
+      {task && <TaskCheck x={b.padX + lead} y={iconY} done={task === 'done'} color={text} />}
       {markers.map((m, i) => (
-        <MarkerGlyph key={m} id={m} x={b.padX + lead + i * (MARKER_SIZE + MARKER_GAP)} y={iconY} />
+        <MarkerGlyph key={m} id={m} x={b.padX + lead + (i + (task ? 1 : 0)) * (MARKER_SIZE + MARKER_GAP)} y={iconY} />
       ))}
       <text
         x={textX}
@@ -176,6 +252,8 @@ export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: Node
         fontWeight={weight}
         fontStyle={s.italic ? 'italic' : undefined}
         fill={text}
+        fillOpacity={task === 'done' ? 0.55 : undefined}
+        textDecoration={task === 'done' ? 'line-through' : undefined}
       >
         {b.lines.map((line, i) => (
           <tspan key={i} x={textX} dy={i === 0 ? 0 : b.lineHeight}>
@@ -183,6 +261,7 @@ export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: Node
           </tspan>
         ))}
       </text>
+      {meta && <MetaChips b={b} x={b.padX + lead} y={b.imageH + (bodyH + Math.max(textBlockH, MARKER_SIZE)) / 2 + 3} text={text} dark={fill === 'transparent' ? !!theme.dark : isDark(fill)} />}
       {nb && (
         <g>
           <path d={`M${b.padX} ${b.h - nb.h}H${b.w - b.padX}`} stroke={text} strokeOpacity={0.18} strokeWidth={1} />

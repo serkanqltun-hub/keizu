@@ -60,7 +60,11 @@ export type CommandId =
   | 'insertMap'
   | 'focus'
   | 'boundary'
-  | 'summary';
+  | 'summary'
+  | 'task'
+  | 'tag'
+  | 'filter'
+  | 'tasks';
 
 
 export interface CommandDef {
@@ -103,6 +107,8 @@ export const COMMANDS: CommandDef[] = [
   { id: 'note', keys: ['F4'], group: 'edit' },
   { id: 'boundary', keys: ['Mod+Shift+B'], group: 'edit' },
   { id: 'summary', keys: ['Mod+Shift+G'], group: 'edit' },
+  { id: 'task', keys: ['Alt+T'], group: 'edit' },
+  { id: 'tag', keys: [], group: 'edit' },
   { id: 'navLeft', keys: ['ArrowLeft'], group: 'navigate' },
   { id: 'navRight', keys: ['ArrowRight'], group: 'navigate' },
   { id: 'navUp', keys: ['ArrowUp'], group: 'navigate' },
@@ -112,6 +118,8 @@ export const COMMANDS: CommandDef[] = [
   { id: 'focus', keys: ['F6'], group: 'navigate' },
   { id: 'toggleOutline', keys: ['Mod+Alt+O'], group: 'view' },
   { id: 'notebook', keys: ['Mod+Alt+N'], group: 'view' },
+  { id: 'filter', keys: ['Mod+Shift+F'], group: 'view' },
+  { id: 'tasks', keys: [], group: 'view' },
   { id: 'zoomIn', keys: ['Mod+=', 'Mod++'], group: 'view' },
   { id: 'zoomOut', keys: ['Mod+-'], group: 'view' },
   { id: 'fit', keys: ['Mod+0'], group: 'view' },

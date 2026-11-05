@@ -112,7 +112,7 @@ describe('smart paste', () => {
     expect(plan.children.map((t) => t.text)).toEqual(['Hafta 1', 'Hafta 2']);
     expect(plan.children[0].children.map((t) => t.text)).toEqual(['Araştırma yap', 'Taslak']);
     expect(plan.children[0].children[1].note).toBe('ilk taslak cuma');
-    expect(plan.children[1].children.map((t) => t.markers)).toEqual([['task-100'], ['task-0']]);
+    expect(plan.children[1].children.map((t) => t.task)).toEqual(['done', 'todo']);
   });
 
   it('reads plain lines and indented outlines', () => {
