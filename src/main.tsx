@@ -11,6 +11,15 @@ import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
 import { PublicView, viewToken } from './ui/PublicView';
 
+// No browser / webview context menu (Back, Reload, Inspect…): Keizu shows
+// its own on the map. Text fields keep the native one for copy, paste and
+// spelling.
+document.addEventListener('contextmenu', (e) => {
+  const el = e.target as Element | null;
+  if (el?.closest?.('input, textarea, [contenteditable=""], [contenteditable="true"], a[href]')) return;
+  e.preventDefault();
+});
+
 // A read-only share link (…/#view=<token>) opens just that map, no library.
 const token = viewToken();
 

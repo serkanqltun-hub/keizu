@@ -449,3 +449,28 @@ button.nav-item:hover:not(.on) { background: var(--soft); }
 .multi-note p { margin: 4px 0 0; }
 .sb-sel { color: var(--accent); font-weight: 600; }
 .o-row.on-multi { background: var(--accent-soft); }
+/* Right-click menu (signature theme: Ito surfaces, Mon accents) */
+.ctx-menu { --danger: #b42d2d; position: fixed; z-index: 30; min-width: 232px; max-width: 320px; padding: 5px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(16, 24, 40, 0.18), 0 2px 6px rgba(16, 24, 40, 0.08); display: flex; flex-direction: column; outline: none; font-size: 13px; animation: kz-pop var(--dur-instant) var(--ease); transform-origin: top left; user-select: none; }
+@media (prefers-color-scheme: dark) { .ctx-menu { --danger: #ff8a8a; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45); } }
+.ctx-item { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 8px 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); text-align: left; white-space: nowrap; transition: background-color var(--dur-instant) ease-out, color var(--dur-instant) ease-out; }
+.ctx-item.on { background: var(--accent-soft); color: var(--accent-ink); }
+.ctx-item.on .ctx-icon { color: var(--accent); }
+.ctx-item.danger { color: var(--danger); }
+.ctx-item.danger .ctx-icon { color: var(--danger); }
+.ctx-item.danger.on { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.ctx-item.disabled { opacity: 0.4; cursor: default; }
+.ctx-item.disabled.on { background: transparent; color: var(--ink); }
+.ctx-icon { width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; color: var(--ink-2); }
+.ctx-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.ctx-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.ctx-keys { margin-left: 16px; padding: 0; border: 0; background: transparent; color: var(--muted); font: 400 11.5px 'JetBrains Mono', ui-monospace, monospace; }
+.ctx-chev { color: var(--muted); margin-right: -2px; }
+.ctx-sep { height: 1px; margin: 4px 6px; background: var(--line); }
+.ctx-swatches { display: flex; align-items: center; gap: 10px; padding: 4px 6px 4px 34px; border-radius: 6px; min-height: 32px; }
+.ctx-swatches.on { background: var(--soft); }
+.ctx-swatches .ctx-label { flex: none; color: var(--ink); }
+.ctx-sw-row { display: flex; gap: 4px; margin-left: auto; }
+.ctx-sw { width: 18px; height: 18px; padding: 0; border-radius: 5px; border: 1px solid color-mix(in srgb, var(--ink) 18%, transparent); font-size: 10px; font-weight: 700; line-height: 1; color: var(--muted); background: var(--surface); display: inline-flex; align-items: center; justify-content: center; transition: transform var(--dur-instant) ease-out, box-shadow var(--dur-instant) ease-out; }
+.ctx-sw:hover, .ctx-sw.kb { transform: scale(1.15); }
+.ctx-sw.checked, .ctx-sw.kb { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent); }
+@media (pointer: coarse) { .ctx-item { height: 40px; } .ctx-sw { width: 24px; height: 24px; } }

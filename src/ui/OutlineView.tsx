@@ -29,6 +29,8 @@ interface Props {
   onCommitEdit(id: string, text: string): void;
   onCancelEdit(): void;
   onToggleCollapse(id: string): void;
+  /** Right click on a row. */
+  onContextMenu?(id: string, clientX: number, clientY: number): void;
 }
 
 export function OutlineView(props: Props) {
@@ -94,6 +96,11 @@ export function OutlineView(props: Props) {
                 props.onSelect(tp.id);
               }}
               onDoubleClick={(e) => !(e.target as Element).closest('.o-toggle') && props.onStartEdit(tp.id)}
+              onContextMenu={(e) => {
+                if (!props.onContextMenu || (e.target as Element).closest('textarea')) return;
+                e.preventDefault();
+                props.onContextMenu(tp.id, e.clientX, e.clientY);
+              }}
             >
               {canToggle ? (
                 <button

@@ -8,6 +8,7 @@ export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(
 
 export type CommandId =
   | 'palette'
+  | 'contextMenu'
   | 'addChild'
   | 'addSibling'
   | 'addSiblingBefore'
@@ -63,6 +64,7 @@ export interface CommandDef {
 export const COMMANDS: CommandDef[] = [
   { id: 'palette', keys: ['Mod+K'], group: 'general' },
   { id: 'shortcuts', keys: ['?'], group: 'general' },
+  { id: 'contextMenu', keys: ['Shift+F10', 'ContextMenu'], group: 'general' },
   { id: 'language', keys: [], group: 'general' },
   { id: 'back', keys: [], group: 'general' },
   { id: 'addChild', keys: ['Tab', 'Insert'], group: 'edit' },
@@ -146,6 +148,7 @@ export function comboParts(combo: string): string[] {
 }
 
 const KEY_NAMES: Record<string, string> = {
+  ContextMenu: 'Menu',
   ArrowLeft: '←',
   ArrowRight: '→',
   ArrowUp: '↑',
