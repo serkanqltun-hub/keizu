@@ -152,6 +152,10 @@ export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: Node
           <circle cx={b.w + 4} cy={b.h / 2} r={4} />
         </g>
       )}
+      {!!b.topic.innerSize && (
+        // A second box peeking out behind: "there is more inside".
+        <rect x={4} y={4} width={b.w} height={b.h} rx={rx} fill={theme.canvas} stroke={b.color} strokeOpacity={0.55} strokeWidth={1.5} data-inner-edge="" />
+      )}
       <rect width={b.w} height={b.h} rx={rx} fill={fill} stroke={stroke} strokeWidth={stroke === 'none' ? 0 : strokeW} />
       {sig && b.depth === 0 && theme.rootDot && <circle cx={b.w - 12} cy={b.h - 12} r={3.5} fill={theme.rootDot} data-root-dot="" />}
       {lead > 0 && (
@@ -200,6 +204,27 @@ export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: Node
           internal={b.topic.href.startsWith('keizu:')}
         />
       )}
+      {!!b.topic.innerSize && <InnerBadge b={b} theme={theme} />}
+    </g>
+  );
+}
+
+/** Corner badge of a topic with an inner map: an icon and how many topics it holds. */
+function InnerBadge({ b, theme }: { b: NodeBox; theme: Theme }) {
+  const n = b.topic.innerSize ?? 0;
+  const label = n > 999 ? '999+' : String(n);
+  const w = 24 + label.length * 6.2;
+  const x = b.w - w + 10, y = -10;
+  return (
+    <g transform={`translate(${x} ${y})`} data-inner-badge={b.id} style={{ cursor: 'zoom-in' }}>
+      <rect width={w} height={20} rx={10} fill={theme.dark ? '#1C222A' : '#FFFFFF'} stroke={b.color} strokeWidth={1.5} />
+      <g fill="none" stroke={b.color} strokeWidth={1.5}>
+        <rect x={6} y={4.5} width={11} height={11} rx={3} />
+        <rect x={9.5} y={8} width={4} height={4} rx={1} />
+      </g>
+      <text x={20} y={14} fontSize={10.5} fontWeight={700} fill={b.color} fontFamily={FONT}>
+        {label}
+      </text>
     </g>
   );
 }

@@ -2,6 +2,7 @@
 // view only, no account needed. It checks for updates every half minute.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { viewOf } from '../core/inner';
 import { layoutMap } from '../core/layout';
 import { normalizeMap, type MindMap } from '../core/model';
 import { getTheme } from '../core/themes';
@@ -57,7 +58,9 @@ export function PublicView({ token }: { token: string }) {
     };
   }, [token]);
 
-  const layout = useMemo(() => (map ? layoutMap(map, canvasMeasure) : null), [map]);
+  // Inner maps stay inside: the shared page shows the outer map with badges.
+  const outer = useMemo(() => (map ? viewOf(map, []) : null), [map]);
+  const layout = useMemo(() => (outer ? layoutMap(outer, canvasMeasure) : null), [outer]);
   if (error && !map) {
     return (
       <div className="public-view empty">
@@ -89,7 +92,7 @@ export function PublicView({ token }: { token: string }) {
         <main className="canvas-area">
           <MapCanvas
             ref={canvas}
-            map={map}
+            map={outer!}
             layout={layout}
             theme={theme}
             selectedId={selectedId}
@@ -120,7 +123,7 @@ export function PublicView({ token }: { token: string }) {
           <div className="chip stats">{t('view.madeWith')}</div>
         </main>
       </div>
-      {presenting && <Presentation map={map} startId={selectedId} onClose={() => setPresenting(false)} />}
+      {presenting && <Presentation map={outer!} startId={selectedId} onClose={() => setPresenting(false)} />}
     </div>
   );
 }

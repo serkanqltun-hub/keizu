@@ -25,6 +25,8 @@ interface Props {
   /** Other maps in the library, for linking a topic to one. */
   maps: { id: string; title: string }[];
   onMap(patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor'>>): void;
+  /** More topic settings, shown under the topic's own (inner map actions). */
+  topicExtra?: React.ReactNode;
 }
 
 const SHAPES: { id: TopicShape; css: React.CSSProperties }[] = [
@@ -61,7 +63,7 @@ function LayoutGlyph({ id, d }: { id: LayoutKind; d: string }) {
   );
 }
 
-export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete }: Props) {
+export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete, topicExtra }: Props) {
   return (
     <aside className="panel" aria-label={t('panel.label')}>
       <div role="tablist" className="tabs">
@@ -72,6 +74,7 @@ export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab
         relation ? (
           <RelationSection key={relation.id} relation={relation} onLabel={onRelationLabel} onDelete={onRelationDelete} />
         ) : topic ? (
+          <>
           <TopicSection
             key={topic.id}
             topic={topic}
@@ -85,6 +88,8 @@ export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab
             onHref={onHref}
             maps={maps.filter((m) => m.id !== map.id)}
           />
+          {topicExtra}
+          </>
         ) : (
           <p className="muted">{t('panel.pickTopic')}</p>
         )

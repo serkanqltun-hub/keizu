@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { viewOf } from '../core/inner';
 import { layoutMap } from '../core/layout';
 import type { MindMap } from '../core/model';
 import { getTheme } from '../core/themes';
@@ -75,7 +76,9 @@ export function VersionPanel({ store, map, fontsReady, onClose, onRestore }: Pro
   );
 }
 
-function Preview({ map, fontsReady }: { map: MindMap; fontsReady: number }) {
+function Preview({ map: file, fontsReady }: { map: MindMap; fontsReady: number }) {
+  // The outer map, as the editor shows it (inner maps stay inside).
+  const map = useMemo(() => viewOf(file, []), [file]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const layout = useMemo(() => layoutMap(map, canvasMeasure), [map, fontsReady]);
   const theme = getTheme(map.theme);
