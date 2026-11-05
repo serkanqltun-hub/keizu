@@ -1,6 +1,6 @@
 [package]
 name = "keizu"
-version = "0.1.0"
+version = "0.2.0"
 description = "Keizu: open-source mind mapping"
 authors = ["Keizu contributors"]
 license = "MIT"

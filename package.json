@@ -1,7 +1,7 @@
 {
   "name": "keizu",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Açık kaynak zihin haritası uygulaması: web ve masaüstü, önce yerel, isteğe bağlı kendi sunucun.",
   "license": "MIT",
   "type": "module",
