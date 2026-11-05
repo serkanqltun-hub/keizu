@@ -12,6 +12,7 @@ import {
   setBranchLayout,
   addSibling,
   addFloating,
+  addFlowLink,
   addRelation,
   countAll,
   floatTopic,
@@ -166,12 +167,16 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
 
   const mainId = map.roots[0].id;
   const [relationFrom, setRelationFrom] = useState<string | null>(null);
+  /** What picking a target makes: a relation arrow, or a flow chart link (paths merge). */
+  const [linkKind, setLinkKind] = useState<'relation' | 'flow'>('relation');
   const [selectedRelId, setSelectedRelId] = useState<string | null>(null);
   const selectedRel = map.relations.find((r) => r.id === selectedRelId);
   const theme = getTheme(map.theme);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const layout = useMemo(() => layoutMap(map, canvasMeasure), [map, fontsReady]);
   const selected = selectedId ? findTopic(map, selectedId) : undefined;
+  /** The selected topic is a step of a flow chart. */
+  const inFlow = !!selectedId && layout.byId.get(selectedId)?.layout === 'flow';
 
   const selectTopic = useCallback((id: string | null) => {
     setSelectedId(id);
@@ -447,7 +452,21 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (!selectedId) return;
       if (view !== 'map') switchView('map');
       setRelationFrom(selectedId);
+      setLinkKind('relation');
       setToast(t('toast.pickRelation'));
+    },
+    merge() {
+      if (!selectedId) return;
+      if (view !== 'map') switchView('map');
+      setRelationFrom(selectedId);
+      setLinkKind('flow');
+      setToast(t('toast.pickMerge'));
+    },
+    /** Flow charts: the path ending at `from` continues to `to`. */
+    link(from: string, to: string) {
+      const r = addFlowLink(map, from, to);
+      if (r.id) commit(r.map);
+      else setToast(t('toast.mergeExists'));
     },
     floating(pos = { x: 0, y: (layout.bounds.maxY ?? 0) + 120 }) {
       const r = addFloating(map, pos, t('topic.floating'));
@@ -601,6 +620,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       sep,
       hasKids && !isMain && item('collapse', actions.collapse, { label: tp.collapsed ? t('ctx.expand') : t('ctx.collapse'), icon: <I.Collapse size={16} /> }),
       item('relation', actions.relation, { icon: <I.RelationIcon size={16} /> }),
+      layout.byId.get(id)?.layout === 'flow' && item('merge', actions.merge, { icon: <I.MergeIcon size={16} /> }),
       view === 'map' && { type: 'item', id: 'focus', label: t('ctx.focus'), keys: keyOf('centerSelected'), icon: <I.Target size={16} />, run: () => canvas.current?.centerOn(id) },
       sep,
       !isMain && item('cut', () => actions.copy(true), { icon: <I.Cut size={16} /> }),
@@ -704,6 +724,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     navUp: { run: () => navigate('up') },
     navDown: { run: () => navigate('down') },
     relation: { run: actions.relation, enabled: !!selectedId },
+    merge: { run: actions.merge, enabled: inFlow },
     floating: { run: () => actions.floating() },
     note: { run: actions.note, enabled: !!selectedId },
     save: { run: () => saveToFile() },
@@ -899,7 +920,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         <nav className="tb-center" aria-label={t('editor.insert')}>
           <button className="tb" title={tip('addSibling')} disabled={!selectedId} onClick={() => actions.addSibling()}><I.TopicIcon />{t('tb.topic')}</button>
           <button className="tb" title={tip('addChild')} disabled={!selectedId} onClick={actions.addChild}><I.SubtopicIcon />{t('tb.subtopic')}</button>
-          <button className={`tb ${relationFrom ? 'on' : ''}`} title={t('tb.relationTip')} disabled={!selectedId} onClick={actions.relation}><I.RelationIcon />{t('tb.relation')}</button>
+          <button className={`tb ${relationFrom && linkKind === 'relation' ? 'on' : ''}`} title={t('tb.relationTip')} disabled={!selectedId} onClick={actions.relation}><I.RelationIcon />{t('tb.relation')}</button>
+          {inFlow && (
+            <button className={`tb ${relationFrom && linkKind === 'flow' ? 'on' : ''}`} title={tip('merge', t('tb.mergeTip'))} onClick={actions.merge}><I.MergeIcon />{t('tb.merge')}</button>
+          )}
           <button className="tb" title={t('tb.floatingTip')} onClick={() => actions.floating()}><I.FloatingIcon />{t('tb.floating')}</button>
           <button className="tb" title={t('tb.markerTip')} disabled={!selectedId} onClick={() => { setPanelOpen(true); setHistoryOpen(false); setPanelTab('style'); }}><I.MarkerIcon />{t('tb.marker')}</button>
           <button className="tb" title={t('tb.noteTip')} disabled={!selectedId} onClick={actions.note}><I.NoteIcon />{t('tb.note')}</button>
@@ -1021,6 +1045,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
                 setPanelTab('style');
               }}
               onPickRelationTarget={(id) => {
+                if (relationFrom && id !== relationFrom && linkKind === 'flow') {
+                  setRelationFrom(null);
+                  setToast(null);
+                  return actions.link(relationFrom, id);
+                }
                 if (relationFrom && id !== relationFrom) {
                   const r = addRelation(map, relationFrom, id);
                   if (r.id) {
@@ -1037,7 +1066,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onStartEdit={(id) => startEdit(id)}
               onCommitEdit={commitEdit}
               onCancelEdit={cancelEdit}
-              onMove={(id, parent) => commit(moveTopic(map, id, parent))}
+              onMove={(id, parent, merge) => (merge ? actions.link(id, parent) : commit(moveTopic(map, id, parent)))}
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
               onZoomChange={setZoom}
               onOpenLink={(id) => actions.openLink(id)}

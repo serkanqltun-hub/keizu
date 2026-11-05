@@ -2,8 +2,9 @@
 // a box for every visible topic. Coordinates are box centres; the central
 // topic sits at (0, 0).
 
+import { layeredLayout, roundedPath, routePoints, type FlowEdgeIn, type FlowRoute } from './flow';
 import { MARKER_GAP, MARKER_SIZE } from './markers';
-import type { LayoutKind, MindMap, Point, Topic, TopicShape } from './model';
+import type { LayoutKind, MindMap, Point, Relation, Topic, TopicShape } from './model';
 export type { Point };
 import { countTopics } from './model';
 import { getTheme } from './themes';
@@ -14,9 +15,10 @@ export type Measure = (text: string, font: string) => number;
  * How a topic's children are arranged around it: to one side, to both
  * sides (mind map), below it (org chart, concept map), as an indented list
  * going down or up (inside timelines, fishbones and matrices), along a time
- * axis, as the bones of a fishbone, or as the columns of a matrix.
+ * axis, as the bones of a fishbone, as the columns of a matrix, or as the
+ * steps of a flow chart (every topic of a flow chart has flow 'flow').
  */
-export type Flow = 'right' | 'left' | 'both' | 'down' | 'tree' | 'treeUp' | 'timeline' | 'fishbone' | 'matrix' | 'matrixCol';
+export type Flow = 'right' | 'left' | 'both' | 'down' | 'tree' | 'treeUp' | 'timeline' | 'fishbone' | 'matrix' | 'matrixCol' | 'flow';
 
 /** Flows whose children hang below (or above) the parent rather than beside it. */
 export const isVerticalFlow = (f: Flow) => f === 'down';
@@ -69,11 +71,26 @@ export interface NoteBlock {
   h: number;
 }
 
+/** An arrow between two steps of a flow chart. */
+export interface FlowEdge {
+  /** 't:' + child id for a tree connector, else the flow link's relation id. */
+  key: string;
+  /** The flow chart's first step: route coordinates are relative to it. */
+  owner: string;
+  from: string;
+  to: string;
+  route: FlowRoute;
+  /** Set for flow links (Relation.kind 'flow'). */
+  relId?: string;
+}
+
 export interface MapLayout {
   kind: LayoutKind;
   nodes: NodeBox[];
   byId: Map<string, NodeBox>;
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
+  /** Arrows of flow charts (their tree connectors and flow links). */
+  flowEdges: FlowEdge[];
 }
 
 export const FONT_FAMILY = "'Plus Jakarta Sans', system-ui, sans-serif";
@@ -212,7 +229,7 @@ const FISH_GAP = 28;
 export const FISH_SLANT = 0.45;
 
 /** Layouts that draw every topic in a box (no underline-only topics). */
-const BOXED: LayoutKind[] = ['org', 'concept', 'timeline', 'fishbone', 'matrix'];
+const BOXED: LayoutKind[] = ['org', 'concept', 'timeline', 'fishbone', 'matrix', 'flow'];
 
 export function layoutMap(map: MindMap, measure: Measure): MapLayout {
   const theme = getTheme(map.theme);
@@ -222,6 +239,8 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
   const palette = (i: number) => (map.multicolor ? theme.palette[i % theme.palette.length] : theme.mono);
   let colorIndex = map.roots[0]?.children.length ?? 0;
   let maxY = 0;
+  const flowEdges: FlowEdge[] = [];
+  const links = map.relations.filter((r) => r.kind === 'flow');
 
   map.roots.forEach((root, ri) => {
     const kind = root.layout ?? mainKind;
@@ -229,7 +248,8 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
     // central topic stays visually unique.
     const baseDepth = ri === 0 ? 0 : 1;
     const rootColor = ri === 0 ? theme.mono : palette(colorIndex++);
-    const tree = layoutTree(root, kind, baseDepth, rootColor, palette, theme.mono, measure, map.resources, theme.signature, !!map.notebook);
+    const tree = layoutTree(root, kind, baseDepth, rootColor, palette, theme.mono, measure, map.resources, theme.signature, !!map.notebook, links);
+    flowEdges.push(...tree.flowEdges);
     let pos = root.pos;
     if (!pos && ri > 0) {
       // No stored position: park it under everything laid out so far.
@@ -254,7 +274,7 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
     bounds.maxY = Math.max(bounds.maxY, b.y + b.h / 2);
   }
   if (!nodes.length) Object.assign(bounds, { minX: 0, minY: 0, maxX: 0, maxY: 0 });
-  return { kind: mainKind, nodes, byId, bounds };
+  return { kind: mainKind, nodes, byId, bounds, flowEdges };
 }
 
 /** Extent of a laid-out subtree around its root's centre (all >= 0). */
@@ -281,7 +301,9 @@ function layoutTree(
   resources?: Record<string, string>,
   signature = false,
   notebook = false,
-): { nodes: NodeBox[]; root: NodeBox; minY: number } {
+  links: Relation[] = [],
+): { nodes: NodeBox[]; root: NodeBox; minY: number; flowEdges: FlowEdge[] } {
+  const flowEdges: FlowEdge[] = [];
   const nodes: NodeBox[] = [];
   const byId = new Map<string, NodeBox>();
   /** Topics whose layout is set explicitly (the tree root counts). */
@@ -321,8 +343,56 @@ function layoutTree(
         return explicit.has(b.id) ? 'matrix' : 'tree';
       case 'mindmap':
         if (explicit.has(b.id)) return 'both';
+        break;
+      case 'flow':
+        return 'flow';
     }
     return side < 0 ? 'left' : 'right';
+  };
+
+  /**
+   * A flow chart starting at `t`: every visible topic below it is a step,
+   * laid out in columns together with the flow links between them.
+   */
+  const arrangeFlow = (t: Topic, e: Ext): Ext => {
+    const steps: Topic[] = [];
+    const parentOf = new Map<string, string>();
+    const collect = (x: Topic) => {
+      steps.push(x);
+      for (const c of kids(x)) {
+        parentOf.set(c.id, x.id);
+        collect(c);
+      }
+    };
+    collect(t);
+    const inside = new Set(steps.map((x) => x.id));
+    const edges: FlowEdgeIn[] = [];
+    for (const x of steps) if (x !== t) edges.push({ key: `t:${x.id}`, from: parentOf.get(x.id)!, to: x.id });
+    for (const r of links) if (inside.has(r.from) && inside.has(r.to)) edges.push({ key: r.id, from: r.from, to: r.to });
+    const res = layeredLayout(
+      steps.map((x) => ({ id: x.id, w: byId.get(x.id)!.w, h: byId.get(x.id)!.h })),
+      edges,
+    );
+    for (const x of steps) {
+      const sb = byId.get(x.id)!;
+      const p = res.pos.get(x.id)!;
+      if (x !== t) {
+        sb.side = 1;
+        sb.flow = 'flow';
+        sb.noEdge = undefined;
+        const pp = res.pos.get(parentOf.get(x.id)!)!;
+        off.set(x.id, { x: p.x - pp.x, y: p.y - pp.y });
+      }
+      e.l = Math.max(e.l, sb.w / 2 - p.x);
+      e.r = Math.max(e.r, p.x + sb.w / 2);
+      e.t = Math.max(e.t, sb.h / 2 - p.y);
+      e.b = Math.max(e.b, p.y + sb.h / 2);
+    }
+    for (const ed of edges) {
+      const route = res.routes.get(ed.key);
+      if (route) flowEdges.push({ key: ed.key, owner: t.id, from: ed.from, to: ed.to, route, relId: ed.key.startsWith('t:') ? undefined : ed.key });
+    }
+    return e;
   };
 
   /** Places the subtree of `t` (on `side` of its parent) and returns its extent. */
@@ -334,6 +404,7 @@ function layoutTree(
     const e: Ext = { l: b.w / 2, r: b.w / 2, t: b.h / 2, b: b.h / 2 };
     const cs = kids(t);
     if (!cs.length) return e;
+    if (b.flow === 'flow') return arrangeFlow(t, e);
     const grow = (c: Topic, ce: Ext, dx: number, dy: number) => {
       off.set(c.id, { x: dx, y: dy });
       e.l = Math.max(e.l, ce.l - dx);
@@ -493,7 +564,7 @@ function layoutTree(
   };
   place(root, 0, 0);
   const minY = nodes.reduce((m, b) => Math.min(m, b.y - b.h / 2), 0);
-  return { nodes, root: byId.get(root.id)!, minY };
+  return { nodes, root: byId.get(root.id)!, minY, flowEdges };
 }
 
 /** Rough measurer for tests and non-browser contexts. */
@@ -604,4 +675,35 @@ export function relationPath(a: NodeBox, b: NodeBox): { d: string; mid: Point } 
     y: 0.125 * e1.y + 0.375 * c1.y + 0.375 * c2.y + 0.125 * p2.y,
   };
   return { d: `M${e1.x} ${e1.y}C${c1.x} ${c1.y} ${c2.x} ${c2.y} ${p2.x} ${p2.y}`, mid };
+}
+
+// ---------- flow chart arrows ----------
+
+/**
+ * The arrow of a flow chart edge as drawn from the current boxes (which may
+ * be mid-animation): its path, the point for words on it, and its head.
+ */
+export function flowEdgeShape(fe: FlowEdge, byId: Map<string, NodeBox>): { d: string; mid: Point; head: string } | undefined {
+  const a = byId.get(fe.from), b = byId.get(fe.to), o = byId.get(fe.owner);
+  if (!a || !b || !o) return undefined;
+  const pts = routePoints({ x: a.x + a.w / 2, y: a.y }, { x: b.x - b.w / 2, y: b.y }, fe.route, o.x, o.y);
+  // Words go on the first stretch after the path turns, near where it starts.
+  let mid = { x: (pts[0].x + pts[pts.length - 1].x) / 2, y: (pts[0].y + pts[pts.length - 1].y) / 2 };
+  for (let i = 1; i + 1 < pts.length; i++) {
+    const p = pts[i], q = pts[i + 1];
+    if (i >= 2 && Math.abs(p.y - q.y) < 0.01) {
+      mid = { x: (p.x + q.x) / 2, y: p.y };
+      break;
+    }
+  }
+  if (pts.length === 2) mid = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
+  const end = pts[pts.length - 1], prev = pts[pts.length - 2];
+  const len = Math.hypot(end.x - prev.x, end.y - prev.y) || 1;
+  const ux = (end.x - prev.x) / len, uy = (end.y - prev.y) / len;
+  const L = 8, W = 4.5;
+  const bx = end.x - ux * L, by = end.y - uy * L;
+  const head = `M${end.x} ${end.y}L${bx - uy * W} ${by + ux * W}L${bx + uy * W} ${by - ux * W}Z`;
+  // The line stops at the base of the head so the tip stays sharp.
+  const line = [...pts.slice(0, -1), { x: bx, y: by }];
+  return { d: roundedPath(line), mid, head };
 }
