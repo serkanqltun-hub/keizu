@@ -48,6 +48,17 @@ describe('mergeMaps', () => {
     expect(findTopic(m, b.id)!.note).toBe('uzak not');
   });
 
+  it('keeps inner maps when both sides changed the same topic', () => {
+    const r = addChild(base, a.id, 'İçeride');
+    const withInner = updateTopic(updateTopic(r.map, r.id, { inside: true }), a.id, { innerLayout: 'logic' });
+    const local = updateTopic(withInner, r.id, { text: 'İçeride (yerel)' });
+    const remote = updateTopic(withInner, r.id, { note: 'uzak not' });
+    const m = mergeMaps(withInner, local, remote)!;
+    expect(findTopic(m, r.id)).toMatchObject({ text: 'İçeride (yerel)', note: 'uzak not', inside: true });
+    const both = mergeMaps(withInner, updateTopic(withInner, a.id, { text: 'A1' }), updateTopic(withInner, a.id, { note: 'n' }))!;
+    expect(findTopic(both, a.id)!.innerLayout).toBe('logic');
+  });
+
   it('keeps children added on both sides, in a sensible order', () => {
     const local = addChild(base, mainRoot(base).id, 'Yerel yeni').map;
     const remote = addChild(base, mainRoot(base).id, 'Uzak yeni').map;
