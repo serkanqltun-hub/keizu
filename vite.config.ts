@@ -1,12 +1,15 @@
 import react from '@vitejs/plugin-react';
 import { loadEnv } from 'vite';
+import { excalidrawFonts } from './scripts/excalidraw-fonts.js';
 import { configDefaults, defineConfig } from 'vitest/config';
 
 // Tauri expects a fixed port and doesn't need the dev server to clear the screen.
 // KEIZU_BASE sets the path the web app is served under (GitHub Pages: /keizu/).
 export default defineConfig(({ mode }) => ({
   base: loadEnv(mode, '.', 'KEIZU_').KEIZU_BASE || '/',
-  plugins: [react()],
+  plugins: [react(), excalidrawFonts()],
+  // Excalidraw checks this at build time.
+  define: { 'process.env.IS_PREACT': JSON.stringify('false') },
   clearScreen: false,
   server: { port: 5173, strictPort: true },
   envPrefix: ['VITE_', 'TAURI_ENV_'],

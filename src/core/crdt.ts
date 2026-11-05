@@ -74,13 +74,50 @@ export interface MapLike {
   branchStyle: string;
   multicolor: boolean;
   notebook?: boolean;
+  canvasMode?: string;
+  canvas?: CanvasLike;
   roots: TopicLike[];
   relations: RelationLike[];
   resources?: Record<string, string>;
 }
 
-const META_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor', 'notebook'];
+/** A free drawing (see src/core/canvas.ts): elements with ids, topic positions. */
+export interface CanvasLike {
+  elements: { id: string; index?: string | null }[];
+  topics?: Record<string, unknown>;
+}
+
+const META_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor', 'notebook', 'canvasMode'];
 const RES = 'res:';
+// A drawing is stored one register per element (and per topic position), so
+// people drawing different shapes at the same time don't overwrite each other.
+const CV = 'cv:';
+const CVT = 'cvt:';
+
+function expandCanvas(c: CanvasLike | undefined, out: Record<string, unknown>): Record<string, unknown> {
+  for (const e of c?.elements ?? []) out[CV + e.id] = e;
+  for (const [id, p] of Object.entries(c?.topics ?? {})) out[CVT + id] = p;
+  return out;
+}
+
+/** Collects `cv:`/`cvt:` registers back into a drawing; undefined when empty. */
+function collectCanvas(fields: Fields): CanvasLike | undefined {
+  const elements: CanvasLike['elements'] = [];
+  const topics: Record<string, unknown> = {};
+  for (const [k, r] of Object.entries(fields)) {
+    if (r.v === null || r.v === undefined) continue;
+    if (k.startsWith(CV)) elements.push(r.v as CanvasLike['elements'][number]);
+    else if (k.startsWith(CVT)) topics[k.slice(CVT.length)] = r.v;
+  }
+  if (!elements.length && !Object.keys(topics).length) return undefined;
+  const key = (e: { id: string; index?: string | null }) => e.index ?? '';
+  elements.sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  const c: CanvasLike = { elements };
+  if (Object.keys(topics).length) c.topics = topics;
+  return c;
+}
+
+const isCanvasKey = (k: string) => k.startsWith(CV) || k.startsWith(CVT);
 
 export function emptyDoc(): CrdtDoc {
   return { meta: {}, topics: {}, relations: {}, clock: 0 };
@@ -202,6 +239,9 @@ export function diff(doc: CrdtDoc, next: MapLike): Change[] {
   const res = next.resources ?? {};
   for (const [k, v] of Object.entries(res)) set('m', '', RES + k, v);
   for (const f of Object.keys(doc.meta)) if (f.startsWith(RES) && !(f.slice(RES.length) in res) && doc.meta[f].v !== null) set('m', '', f, null);
+  const cv = expandCanvas(next.canvas, {});
+  for (const [k, v] of Object.entries(cv)) set('m', '', k, v);
+  for (const f of Object.keys(doc.meta)) if (isCanvasKey(f) && !(f in cv) && doc.meta[f].v !== null) set('m', '', f, null);
 
   // Topics: fields, then places.
   const seen = new Set<string>();
@@ -231,7 +271,8 @@ export function diff(doc: CrdtDoc, next: MapLike): Change[] {
   const walk = (t: TopicLike) => {
     seen.add(t.id);
     if (valueOf(doc, 't', t.id, 'del') === true) out.push({ k: 't', id: t.id, f: 'del', v: false });
-    const own = fieldsOf(t);
+    const { canvas, ...plain } = fieldsOf(t);
+    const own = expandCanvas(canvas as CanvasLike | undefined, plain);
     const names = new Set(Object.keys(own).filter((k) => k !== 'id' && k !== 'children'));
     for (const f of Object.keys(doc.topics[t.id] ?? {})) if (f !== 'place' && f !== 'del') names.add(f);
     for (const f of names) set('t', t.id, f, own[f]);
@@ -284,7 +325,9 @@ export function materialize(doc: CrdtDoc): MapLike {
     done.add(id);
     const f = live.get(id)!;
     const t: Record<string, unknown> = { id, text: '' };
-    for (const [k, r] of Object.entries(f)) if (k !== 'place' && k !== 'del' && k !== 'id' && k !== 'children' && r.v !== null) t[k] = r.v;
+    for (const [k, r] of Object.entries(f)) if (k !== 'place' && k !== 'del' && k !== 'id' && k !== 'children' && !isCanvasKey(k) && r.v !== null) t[k] = r.v;
+    const canvas = collectCanvas(f);
+    if (canvas) t.canvas = canvas;
     if (typeof t.text !== 'string') t.text = '';
     t.children = (kids.get(id) ?? []).filter((c) => !done.has(c)).map(build);
     return t as unknown as TopicLike;
@@ -344,6 +387,9 @@ export function materialize(doc: CrdtDoc): MapLike {
     branchStyle: String(m('branchStyle', 'curve')),
     multicolor: m('multicolor', true) !== false,
     ...(m('notebook', false) === true ? { notebook: true } : {}),
+    // Always present (maybe undefined) so a removed drawing clears the copy it is spread over.
+    canvasMode: typeof doc.meta.canvasMode?.v === 'string' ? (doc.meta.canvasMode.v as string) : undefined,
+    canvas: collectCanvas(doc.meta),
     roots,
     relations,
     resources: Object.keys(resources).length ? resources : undefined,

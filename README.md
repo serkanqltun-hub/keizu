@@ -47,6 +47,7 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 - **İsteğe bağlı bulut senkronu** (Ayarlar → Bulut senkronu): kendi **Keizu Server**'ını ya da bir WebDAV klasörünü (Nextcloud vb.) bağla, haritaların cihazların arasında arka planda eşitlensin. İlk açılışta hiçbir şey sorulmaz; bağlamazsan Keizu tamamen yerel çalışır. Çevrimdışı düzenlemeler bağlantı gelince gönderilir, iki cihazın değişiklikleri konu konu birleştirilir, birleşemeyen durumda hiçbir şey kaybolmaz (çakışan kopya)
 - **Haritalar arası bağlantı**: bir konuyu başka bir haritaya (veya bir web adresine) bağla; konudaki simgeye tıklayınca ya da Alt+Enter ile açılır (Biçim paneli → Bağlantı)
 - **İç ağaçlar (iç haritalar)**: bir konunun içinde ayrı bir harita tut. Dışarıdan normal bir konu gibi görünür (köşesindeki rozet içindeki konu sayısını gösterir); çift tıklayınca kamera konuya dalar, konunun kutusu tuvali doldurur ve iç harita açılır. Üstteki yol çubuğu (Oyun › A operasyonu › Keşif), Esc ya da Ctrl/⌘ + Alt + ↑ ile dışarı çıkılır. Bir dalı iç haritaya çevirip geri açabilir, kitaplıktaki başka bir haritayı ya da bir dosyayı konu olarak ekleyebilirsin (sağ tık menüsü, Biçim paneli ya da komut paleti). İç haritanın kendi şema türü olur; iç haritalar aynı dosyada saklanır
+- **Tuval modu** (Excalidraw tabanlı): sağ üstteki **Harita / Tuval / İkisi** seçicisiyle bir haritayı ya da bir iç haritayı serbest çizim tuvaline çevir. Kalem, dikdörtgen, elips, elmas, ok, çizgi, metin, görsel ve şekil kitaplığı; elle çizilmiş görünüm; oklar şekillere yapışır. "İkisi"nde haritanın konuları tuvalde şekil olarak durur: taşıyabilir, okları onlara bağlayabilir, metnini tuvalde düzeltebilirsin (konu da değişir). Bir konuya sağ tıklayıp "Konuya tuval ekle" ile içi tuval olan bir konu açılır. Çizim aynı .keizu dosyasında saklanır, PNG / SVG / PDF olarak dışa aktarılır; senkronda ve canlı ortak çalışmada şekil şekil birleştirilir, iki kişi aynı anda çizebilir. Tuval yalnız açıldığında yüklenir ve yazı tipleri uygulamanın içindedir, internet gerekmez
 - **Sunum modu** (F5): harita tam ekran, konu konu; kamera her adımda o konuya ve alt konularına kayar, gerisi soluklaşır. Ok tuşları / boşluk ile ilerle, Esc ile çık
 - **Paylaşım ve canlı ortak çalışma** (Keizu Server 1.1+): haritayı sunucudaki bir hesapla "görüntüleyebilir" ya da "düzenleyebilir" olarak paylaş; paylaşılan kişi yalnız o haritayı görür. Aynı anda düzenleyenler birbirinin değişikliğini anında görür, kimin hangi konuda olduğu renkli çerçeveyle belli olur. Bağlantı koparsa düzenlemeler bekler ve geri gelince gönderilir; geri al yalnız senin değişikliklerini geri alır. Ücretsizdir, yalnız kendi sunucunla çalışır
 - **Salt okunur link**: hesabı olmayan biri linkle haritayı görüntüleyebilir (ve sunabilir); link istendiğinde iptal edilir
@@ -80,6 +81,7 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 | Boş alana çift tıkla | Serbest konu |
 | İç haritalı konuya çift tıkla, Ctrl/⌘ + Alt + ↓ | İçine gir |
 | Esc, Ctrl/⌘ + Alt + ↑ | İç haritadan dışarı çık |
+| Ctrl/⌘ + Alt + D | Tuval moduna geç / haritaya dön |
 | ? | Kısayollar (buradan değiştirilebilir) |
 
 Bunlar varsayılanlardır; değiştirdiğin kısayollar bu cihazda saklanır.
@@ -140,6 +142,8 @@ resources/<id>.<uzantı> konu görselleri
 ```
 
 İç haritaların konuları, sahibi olan konunun normal alt konuları olarak saklanır ve `"inside": true` ile işaretlenir; iç haritanın şema türü konunun `innerLayout` alanındadır. Böylece eski Keizu sürümleri bu konuları sıradan alt konular olarak gösterir.
+
+Tuval çizimleri Excalidraw öğeleri olarak saklanır: dış haritanınki `canvas` ve `canvasMode` alanlarında, bir konunun içindeki tuval konunun `canvas` ve `innerKind` (`"canvas"` ya da `"both"`) alanlarında. `canvas.topics`, "İkisi" modunda konuların tuvaldeki yerini tutar. Çizimdeki görseller de `resources/` altına yazılır.
 
 Düz JSON seçeneği aynı haritayı tek bir metin dosyasına yazar (görseller içine gömülür), böylece git'te satır satır fark görülebilir. Keizu her iki biçimi de, ilk sürümün düz JSON `.keizu` dosyalarını da açar. Dosya uzantısı `.json` ise düz JSON, değilse paket yazılır.
 
