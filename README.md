@@ -27,7 +27,7 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 - Sürükle-bırak ile konu taşıma; boş alana bırakınca serbest konu olur
 - Dal daraltma, geri al / yinele, kopyala / kes / yapıştır
 - 4 tema (Taze, Gece, Kâğıt, Sade), dal stilleri (eğri, dirsek, düz), konu şekli ve rengi
-- İşaretler (öncelik, ilerleme, bayrak, simge) ve konu notları
+- İşaretler (öncelik, ilerleme, bayrak, simge) ve konu notları: konunun yanında açılan not kartı (F4 ya da konudaki not simgesine tıkla), istenirse not konunun içinde görünür; Markdown ve OPML dışa/içe aktarmada notlar korunur, sunumda o konunun notu altta çıkar
 - Konulara görsel ekleme (PNG, JPEG, GIF, WebP)
 - `.keizu` dosyası: harita JSON'u ve görselleri tek bir pakette; istersen git dostu düz JSON
 - Masaüstünde gerçek dosyalar: Kaydet ile bir dosya seç, değişiklikler o dosyaya otomatik yazılır; `.keizu` dosyasına çift tıklayınca Keizu'da açılır

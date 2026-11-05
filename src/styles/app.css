@@ -84,6 +84,18 @@ kbd { font: 600 11px var(--font); padding: 2px 6px; border: 1px solid var(--line
 .canvas { position: absolute; inset: 0; overflow: hidden; touch-action: none; user-select: none; }
 .canvas-svg { width: 100%; height: 100%; display: block; }
 .edit-box { position: absolute; z-index: 3; resize: none; overflow: hidden; border: 2px solid var(--accent); outline: 0; margin: 0; box-shadow: 0 4px 16px rgba(16, 24, 40, 0.15); white-space: pre; }
+/* note card on the canvas */
+.note-pop { position: absolute; z-index: 4; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 28px rgba(16, 24, 40, 0.18); }
+.note-pop-head { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
+.note-pop-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.note-pop textarea { width: 100%; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; line-height: 1.5; background: var(--bg, transparent); color: inherit; }
+.note-pop textarea:focus { outline: 0; border-color: var(--accent); }
+.note-pop-read { max-height: 320px; overflow-y: auto; white-space: pre-wrap; font-size: 13px; line-height: 1.5; }
+.note-pop-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.note-pop-foot .check { justify-content: flex-start; gap: 6px; font-size: 12px; }
+.note-pop-foot .check input { width: 15px; height: 15px; margin: 0; }
+.note-pop-clear { border: 0; background: none; padding: 2px 4px; font-size: 12px; color: var(--muted); }
+.note-pop-clear:hover { color: #c92a2a; }
 .chip { position: absolute; padding: 6px 12px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 .stats { left: 16px; bottom: 16px; }
 .zoom { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06); }
@@ -334,6 +346,7 @@ mark { background: color-mix(in srgb, #ffd43b 55%, transparent); color: inherit;
 /* ---------- presentation ---------- */
 .present { position: fixed; inset: 0; z-index: 100; outline: none; cursor: pointer; }
 .present svg { display: block; }
+.present-note { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); max-width: min(720px, calc(100vw - 48px)); max-height: 30vh; overflow-y: auto; padding: 12px 16px; border-radius: 12px; background: rgba(255, 255, 255, 0.94); color: #1D232B; border: 1px solid rgba(16, 24, 40, 0.1); box-shadow: 0 8px 24px rgba(16, 24, 40, 0.16); font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
 .present-bar { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 12px; background: rgba(31, 42, 55, 0.88); color: #fff; font-size: 13px; opacity: 0.25; transition: opacity 0.2s; cursor: default; }
 .present-bar:hover, .present:focus-visible .present-bar { opacity: 1; }
 .present-bar .ib { color: #fff; font-size: 18px; }

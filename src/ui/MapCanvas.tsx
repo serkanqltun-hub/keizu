@@ -9,6 +9,7 @@ import { snappedViewport } from '../core/viewport';
 import { t } from '../i18n';
 import { MapSvg, SELECT_COLOR, TopicView, nodeColors } from './MapSvg';
 import { canvasMeasure } from './measure';
+import { NotePopover, type NoteSave } from './NotePopover';
 
 export interface CanvasHandle {
   zoomBy(factor: number): void;
@@ -50,6 +51,11 @@ interface Props {
   onZoomChange(k: number): void;
   /** The link icon on a topic was clicked. */
   onOpenLink?(id: string): void;
+  /** Topic whose note card is open on the canvas. */
+  noteId?: string | null;
+  onOpenNote?(id: string): void;
+  onCloseNote?(): void;
+  onSaveNote?(id: string, save: NoteSave): void;
   /** View only: no dragging, no new topics. */
   readOnly?: boolean;
   /** Other people in a live session and the topic each has selected. */
@@ -218,6 +224,8 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 && e.button !== 1) return;
     const el = e.target as Element;
+    // A click anywhere on the canvas closes an open note card (which saves it).
+    if (props.noteId) props.onCloseNote?.();
     const collapse = el.closest('[data-collapse-id]');
     if (collapse) {
       props.onToggleCollapse(collapse.getAttribute('data-collapse-id')!);
@@ -233,6 +241,11 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     if (topicId && el.closest('[data-link-glyph]') && props.onOpenLink) {
       props.onSelect(topicId);
       props.onOpenLink(topicId);
+      return;
+    }
+    if (topicId && el.closest('[data-note-glyph]') && props.onOpenNote) {
+      if (topicId !== editingId) props.onSelect(topicId);
+      if (topicId !== props.noteId) props.onOpenNote(topicId);
       return;
     }
     const relation = el.closest('[data-relation-id]');
@@ -299,6 +312,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   const dragBox = drag ? layout.byId.get(drag.id) : undefined;
   const targetBox = drag?.target ? layout.byId.get(drag.target) : undefined;
   const editBox = editingId ? layout.byId.get(editingId) : undefined;
+  const noteBox = props.noteId && !editingId ? layout.byId.get(props.noteId) : undefined;
 
   return (
     <div
@@ -391,6 +405,17 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
           onCancel={props.onCancelEdit}
         />
       )}
+      {noteBox && size.w > 0 && (
+        <NotePopover
+          key={noteBox.id}
+          box={noteBox}
+          view={view}
+          size={size}
+          readOnly={props.readOnly}
+          onSave={(save) => props.onSaveNote?.(noteBox.id, save)}
+          onClose={() => props.onCloseNote?.()}
+        />
+      )}
     </div>
   );
 });
@@ -409,7 +434,7 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
   const textW = Math.max(...lines.map((l) => canvasMeasure(l || ' ', box.font)));
   const w = Math.max(box.w, textW + box.padX * 2 + 8) * view.k;
   // The edit box covers the text area only, below any picture.
-  const bodyH = box.h - box.imageH;
+  const bodyH = box.h - box.imageH - (box.noteBlock?.h ?? 0);
   const padY = (bodyH - box.lineHeight * box.lines.length) / 2;
   const h = Math.max(bodyH, lines.length * box.lineHeight + padY * 2) * view.k;
   const { fill, text } = nodeColors(box, theme);

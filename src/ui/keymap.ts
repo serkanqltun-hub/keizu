@@ -76,7 +76,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'outdent', keys: ['Shift+Tab'], outlineOnly: true, group: 'edit' },
   { id: 'relation', keys: [], group: 'edit' },
   { id: 'floating', keys: [], group: 'edit' },
-  { id: 'note', keys: [], group: 'edit' },
+  { id: 'note', keys: ['F4'], group: 'edit' },
   { id: 'navLeft', keys: ['ArrowLeft'], group: 'navigate' },
   { id: 'navRight', keys: ['ArrowRight'], group: 'navigate' },
   { id: 'navUp', keys: ['ArrowUp'], group: 'navigate' },

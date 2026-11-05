@@ -41,6 +41,7 @@ import { VersionPanel } from './VersionPanel';
 import { FormatPanel } from './FormatPanel';
 import * as I from './Icons';
 import { MapCanvas, type CanvasHandle } from './MapCanvas';
+import type { NoteSave } from './NotePopover';
 import { canvasMeasure } from './measure';
 import { OutlineView } from './OutlineView';
 import { CommandPalette, type PaletteCommand } from './CommandPalette';
@@ -116,6 +117,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const [toast, setToast] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [presenting, setPresenting] = useState(false);
+  // Topic whose note card is open on the canvas.
+  const [noteId, setNoteId] = useState<string | null>(null);
   // Other maps, for linking a topic to one.
   const [libraryMaps, setLibraryMaps] = useState<{ id: string; title: string }[]>([]);
   useEffect(() => {
@@ -175,6 +178,27 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     }
     setHist((h) => push(h, next));
     if (select !== undefined) setSelectedId(select);
+  }, []);
+
+  // The note card belongs to the selected topic on the map.
+  useEffect(() => {
+    if (noteId && (selectedId !== noteId || view !== 'map')) setNoteId(null);
+  }, [selectedId, view, noteId]);
+
+  // Saves a note card. Works on the newest map, since the card saves as it
+  // closes, possibly in the same moment as another change.
+  const saveNote = useCallback((id: string, save: NoteSave) => {
+    if (readOnlyRef.current) return;
+    setHist((h) => {
+      const tp = findTopic(h.present, id);
+      if (!tp) return h;
+      const note = save.note.trim() ? save.note : undefined;
+      const showNote = note && save.showNote ? true : undefined;
+      if (note === tp.note && showNote === tp.style?.showNote) return h;
+      const style = { ...tp.style, showNote };
+      if (!showNote) delete style.showNote;
+      return push(h, updateTopic(h.present, id, { note, style: Object.keys(style).length ? style : undefined }));
+    });
   }, []);
 
   // Every local change goes to the live session as it happens.
@@ -404,6 +428,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       startEdit(r.id);
     },
     note() {
+      if (!selectedId) return;
+      // On the map the note opens in a card next to the topic.
+      if (view === 'map') return void setNoteId(selectedId);
       setPanelOpen(true);
       setHistoryOpen(false);
       setPanelTab('style');
@@ -726,6 +753,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
               onZoomChange={setZoom}
               onOpenLink={(id) => actions.openLink(id)}
+              noteId={noteId}
+              onOpenNote={setNoteId}
+              onCloseNote={() => setNoteId(null)}
+              onSaveNote={saveNote}
               readOnly={readOnly}
               peers={live.peers.map((p) => ({ id: p.id, name: p.name, color: p.color, selectedId: p.sel }))}
             />

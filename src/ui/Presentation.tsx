@@ -100,6 +100,7 @@ export function Presentation({ map, startId, onClose }: Props) {
     };
   }, []);
 
+  const currentNote = findTopic(full, current)?.note?.trim();
   const last = steps.length - 1;
   const go = (n: number) => setI(Math.max(0, Math.min(last, n)));
   const close = () => onClose(current);
@@ -144,6 +145,9 @@ export function Presentation({ map, startId, onClose }: Props) {
       <svg width="100%" height="100%" viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`} preserveAspectRatio="xMidYMid meet" aria-hidden="true">
         <MapSvg map={full} layout={layout} theme={theme} dimIds={dim} selectedId={current} />
       </svg>
+      {currentNote && (
+        <div className="present-note" aria-label={t('note.presentLabel')}>{currentNote}</div>
+      )}
       <div className="present-bar">
         <button className="ib" aria-label={t('present.prev')} title={t('present.prev')} disabled={i === 0} onClick={() => go(i - 1)}>‹</button>
         <span>{t('present.step', { n: i + 1, total: steps.length })}</span>
