@@ -8,6 +8,7 @@ WORKDIR /src
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY index.html vite.config.ts tsconfig.json ./
+COPY scripts ./scripts
 COPY public ./public
 COPY src ./src
 RUN npx vite build --outDir /web

@@ -5,7 +5,7 @@ on:
     branches: [main]
     tags: ['server-v*']
     # The image bundles the web app, so app changes rebuild it too.
-    paths: ['server/**', 'src/**', 'public/**', 'index.html', 'package*.json', 'vite.config.ts', '.dockerignore', '.github/workflows/server.yml']
+    paths: ['server/**', 'src/**', 'public/**', 'index.html', 'package*.json', 'vite.config.ts', 'scripts/**', '.dockerignore', '.github/workflows/server.yml']
   pull_request:
     paths: ['server/**', '.dockerignore', '.github/workflows/server.yml']
 

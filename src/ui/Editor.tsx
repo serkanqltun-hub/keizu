@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { initHistory, push, redo, replace, undo, type History } from '../core/history';
 import { layoutMap, type FocusOptions, type MapLayout } from '../core/layout';
 import { outlineRows } from '../core/outline';
@@ -64,6 +64,9 @@ import {
 import { importFile } from '../core/importFile';
 import { pickFiles } from './platform';
 import { nodeColors } from './MapSvg';
+import { VIEW_KINDS, addCanvas, setViewCanvas, setViewKind, viewCanvas, viewKind, type ViewKind } from '../core/canvas';
+import type { CanvasBoardHandle, BoardTopic } from './CanvasBoard';
+import { preInvert } from './preInvert';
 import { ghostOf, playEnter, playExit } from './innerMotion';
 import { SNAPSHOT_EVERY_MS } from '../core/versions';
 import type { FileLink, LibraryStore } from '../sync/types';
@@ -109,6 +112,9 @@ function nearest(layout: MapLayout, fromId: string, dir: Dir): string | undefine
 }
 
 type ViewMode = 'map' | 'outline';
+
+// The drawing canvas (Excalidraw) is big: load it only when a view uses it.
+const CanvasBoard = lazy(() => import('./CanvasBoard'));
 const VIEW_KEY = 'keizu:view';
 
 function savedView(): ViewMode {
@@ -252,6 +258,29 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   /** The topic the map is drawn around: the focused one, or the main topic. */
   const viewRootId = focused?.id ?? mainId;
 
+  // Canvas mode: this view shown as a free drawing, alone or with its topics on it.
+  const inner = path.length > 0;
+  const kind: ViewKind = viewKind(map, inner);
+  const drawing = view === 'map' && kind !== 'map';
+  const board = useRef<CanvasBoardHandle>(null);
+  const boardPath = path;
+  const boardCanvas = viewCanvas(map, inner);
+  const boardTopics = useMemo<BoardTopic[]>(
+    () =>
+      kind === 'both'
+        ? layout.nodes.map((b) => {
+            const c = nodeColors(b, theme);
+            return { id: b.id, text: b.topic.text, parentId: b.parentId, x: b.x, y: b.y, w: b.w, h: b.h, stroke: b.color, fill: c.fill === 'transparent' ? 'transparent' : c.fill, textColor: c.text, depth: b.depth };
+          })
+        : [],
+    [kind, layout, theme],
+  );
+  const setKind = (k: ViewKind) => {
+    if (k === kind || readOnly) return;
+    commit(setViewKind(map, inner, k));
+    if (view !== 'map') setView('map');
+  };
+
   const selectTopic = useCallback((id: string | null) => {
     setSelectedId(id);
     if (id) {
@@ -349,6 +378,20 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     }
     setHist((h) => push(h, writeBack(h.present, pathRef.current, next)));
     if (select !== undefined) setSelectedId(select);
+  }, []);
+  /**
+   * Edits the view at `at` as it is now. The drawing canvas saves after a
+   * pause, possibly after you have left that view, so it can't use `map`.
+   */
+  const editView = useCallback((at: InnerPath, fn: (view: MindMap) => MindMap) => {
+    if (readOnlyRef.current) return;
+    setHist((h) => {
+      const at2 = validPath(h.present, at);
+      if (at2.length !== at.length) return h;
+      const before = viewOf(h.present, at);
+      const next = fn(before);
+      return next === before ? h : push(h, writeBack(h.present, at, next));
+    });
   }, []);
   /** Records a change made to the whole file (not to the view). */
   const commitDoc = useCallback((next: MindMap, select?: string | null) => {
@@ -987,7 +1030,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           ]
         : isMain
           ? []
-          : [hasKids ? item('branchToInner', commands.branchToInner.run, { icon: <I.InnerIcon size={16} /> }) : item('addInner', commands.addInner.run, { icon: <I.InnerIcon size={16} /> })];
+          : [
+              hasKids ? item('branchToInner', commands.branchToInner.run, { icon: <I.InnerIcon size={16} /> }) : item('addInner', commands.addInner.run, { icon: <I.InnerIcon size={16} /> }),
+              item('addCanvas', commands.addCanvas.run, { icon: <I.BrushIcon size={16} /> }),
+            ];
     return tidy([
       ...innerItems,
       innerItems.length > 0 && sep,
@@ -1223,6 +1269,20 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       enabled: !!selected && !selectedHasInner && selectedId !== mainId && !readOnly,
     },
     insertMap: { run: () => setInsertOpen(true), enabled: !readOnly },
+    viewCanvas: { run: () => setKind(kind === 'map' ? 'canvas' : 'map'), enabled: !readOnly },
+    viewBoth: { run: () => setKind(kind === 'both' ? 'map' : 'both'), enabled: !readOnly },
+    addCanvas: {
+      run: () => {
+        if (!selectedId) return;
+        const tp = findTopic(doc, selectedId);
+        if (!tp || hasInner(tp)) return;
+        commitDoc(updateTopic(doc, selectedId, addCanvas(tp)), selectedId);
+        crumbColors.current.set(selectedId, colorOf(selectedId));
+        setCrumbAnim(true);
+        goToPath([...path, selectedId]);
+      },
+      enabled: !!selected && !selectedHasInner && selectedId !== mainId && !readOnly,
+    },
   };
 
   // Keyboard shortcuts (inactive while typing in a field or a dialog is open).
@@ -1231,6 +1291,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (editingId || keysOpen || presenting || shareOpen || ctx || insertOpen) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (drawing) return; // see the canvas-mode handler below
       const combo = comboFromEvent(e);
       if (!combo) return;
       if (paletteOpen && combo !== 'Mod+K') return;
@@ -1275,10 +1336,41 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  // Keys in canvas mode. The drawing canvas has its own keys and stops
+  // them from bubbling, so this listens first (capture). Keizu keeps only a
+  // few that aren't about topics, and Esc leaves an inner view once the
+  // canvas is idle (nothing selected, no tool, no text being typed).
+  useEffect(() => {
+    if (!drawing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (keysOpen || presenting || shareOpen || ctx || insertOpen || paletteOpen) return;
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || (tag === 'TEXTAREA' && !(e.target as HTMLElement).closest('.excalidraw'))) return;
+      if (e.key === 'Escape') {
+        if (path.length && tag !== 'TEXTAREA' && (board.current?.idle() ?? true)) {
+          e.preventDefault();
+          e.stopPropagation();
+          exitInner();
+        }
+        return;
+      }
+      if (tag === 'TEXTAREA') return;
+      const c = comboFromEvent(e);
+      const id = c ? commandFor(keymap, c, false) : undefined;
+      const allowed: CommandId[] = ['palette', 'save', 'saveAs', 'exitInner', 'present', 'viewCanvas', 'viewBoth', 'history', 'toggleOutline'];
+      if (!id || !allowed.includes(id)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (commands[id].enabled !== false) commands[id].run();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  });
+
   // Smart paste: whatever is on the clipboard becomes topics.
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      if (editingId || keysOpen || presenting || shareOpen || paletteOpen) return;
+      if (editingId || keysOpen || presenting || shareOpen || paletteOpen || drawing) return;
       const el = e.target as HTMLElement | null;
       const tag = el?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
@@ -1311,9 +1403,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const runExport = async (kind: 'png' | 'svg' | 'pdf' | 'md' | 'opml' | 'keizu' | 'json') => {
     setExportOpen(false);
     try {
-      if (kind === 'png') await exportPng(map, fullLayout, theme);
-      if (kind === 'svg') await exportSvg(map, fullLayout, theme);
-      if (kind === 'pdf') await exportPdf(map, fullLayout, theme);
+      // A drawing exports the drawing (with its topics in "both" mode).
+      if (drawing && board.current && (kind === 'png' || kind === 'svg' || kind === 'pdf')) await board.current.exportAs(kind, inner ? map.roots[0].text || map.title : map.title);
+      else if (kind === 'png') await exportPng(map, fullLayout, theme);
+      else if (kind === 'svg') await exportSvg(map, fullLayout, theme);
+      else if (kind === 'pdf') await exportPdf(map, fullLayout, theme);
       // Files hold everything, inner maps included; pictures show what you see.
       if (kind === 'md') await exportMarkdown(doc);
       if (kind === 'opml') await exportOpml(doc);
@@ -1354,6 +1448,17 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     return theme.mono;
   };
   const shareAvail = !shared && sync.canShare();
+  // Map / canvas / both: top-right of the canvas area, in both modes.
+  const kindSwitch = readOnly ? null : (
+    <div className="seg-tabs kind-switch" role="group" aria-label={t('canvas.switch')}>
+            {VIEW_KINDS.map((k) => (
+              <button key={k} data-kind={k} className={kind === k ? 'on' : ''} aria-pressed={kind === k} title={t(`canvas.kindTip.${k}`)} onClick={() => setKind(k)}>
+                {k === 'map' ? <I.SubtopicIcon size={15} /> : k === 'canvas' ? <I.BrushIcon size={15} /> : <I.InnerIcon size={15} />}
+                {t(`canvas.kind.${k}`)}
+              </button>
+            ))}
+          </div>
+  );
 
   return (
     <div className={`editor ${theme.dark ? 'dark-map' : ''}`}>
@@ -1446,6 +1551,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           <div className="tb-center readonly-note">{t('live.readOnlyBar')}</div>
         ) : (
         <nav className="tb-center" aria-label={t('editor.insert')}>
+          {!drawing && <>
           <button className="tb" title={tip('addSibling')} disabled={!selectedId} onClick={() => actions.addSibling()}><I.TopicIcon />{t('tb.topic')}</button>
           <button className="tb" title={tip('addChild')} disabled={!selectedId} onClick={actions.addChild}><I.SubtopicIcon />{t('tb.subtopic')}</button>
           <button className={`tb ${relationFrom && linkKind === 'relation' ? 'on' : ''}`} title={t('tb.relationTip')} disabled={!selectedId} onClick={actions.relation}><I.RelationIcon />{t('tb.relation')}</button>
@@ -1502,6 +1608,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           >
             <I.NotebookIcon />{t('tb.notebook')}
           </button>
+          </>}
         </nav>
         )}
 
@@ -1560,13 +1667,36 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               <I.Share size={16} /> {t('share.button')}
             </button>
           )}
-          <button className={`ib ${panelOpen ? 'on' : ''}`} aria-label={cmdLabel('panel')} aria-pressed={panelOpen} title={tip('panel')} onClick={() => setPanelOpen((v) => !v)}><I.Panel /></button>
+          {!drawing && <button className={`ib ${panelOpen ? 'on' : ''}`} aria-label={cmdLabel('panel')} aria-pressed={panelOpen} title={tip('panel')} onClick={() => setPanelOpen((v) => !v)}><I.Panel /></button>}
         </div>
       </header>
 
       <div className="workspace">
-        <main className="canvas-area">
-          {view === 'map' ? (
+        <main className={`canvas-area ${drawing ? 'drawing' : ''}`}>
+          {drawing ? (
+            <Suspense fallback={<div className="canvas-loading">{t('canvas.loading')}</div>}>
+              <CanvasBoard
+                key={`${pathKey}|${kind}`}
+                ref={board}
+                canvas={boardCanvas}
+                mode={kind as 'canvas' | 'both'}
+                topics={boardTopics}
+                resources={map.resources}
+                dark={theme.dark}
+                lang={getLang()}
+                readOnly={readOnly}
+                background={theme.dark ? preInvert(theme.canvas) : theme.canvas}
+                onChange={(c, files) =>
+                  editView(boardPath, (v) => {
+                    const next = setViewCanvas(v, boardPath.length > 0, c);
+                    return Object.keys(files).length ? { ...next, resources: { ...next.resources, ...files } } : next;
+                  })
+                }
+                onTopicText={(id, text) => editView(boardPath, (v) => updateTopic(v, id, { text }))}
+                topRight={kindSwitch}
+              />
+            </Suspense>
+          ) : view === 'map' ? (
             <MapCanvas
               ref={canvas}
               map={map}
@@ -1684,7 +1814,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               })}
             </nav>
           )}
-          {view === 'map' && focused && (
+          {view === 'map' && !drawing && focused && (
             <nav className="focus-bar" aria-label={t('focus.label')} style={path.length ? { top: 60 } : undefined}>
               <I.FocusIcon size={15} />
               <ol>
@@ -1704,7 +1834,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               </button>
             </nav>
           )}
-          {view === 'map' && (
+          {view === 'map' && !drawing && kindSwitch && <div className="kind-float">{kindSwitch}</div>}
+          {view === 'map' && !drawing && (
             <div className="zoom">
               <button className="ib" aria-label={cmdLabel('zoomOut')} title={tip('zoomOut')} onClick={() => canvas.current?.zoomBy(1 / 1.2)}><I.Minus size={16} /></button>
               <span>{Math.round(zoom * 100)}%</span>
@@ -1725,7 +1856,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         <span>{t('status.relations', { n: map.relations.length })}</span>
         {multi && <span className="sb-sel">{t('status.selected', { n: selectedIds.length })}</span>}
         {live.peers.length > 0 && <span>{t('live.peers', { n: live.peers.length })}</span>}
-        <span>{layoutName(map.layout)}</span>
+        <span>{drawing ? t(`canvas.kind.${kind}`) : layoutName(map.layout)}</span>
         {path.length > 0 && <span>{t('inner.where', { n: path.length })}</span>}
         {focused && <span>{t('status.focus', { name: focused.text.split('\n')[0] })}</span>}
         <button className="sb-lang" title={t('status.lang')} onClick={() => commands.language.run()}>{getLang().toUpperCase()}</button>
@@ -1747,7 +1878,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           />
         )}
 
-        {panelOpen && !historyOpen && !readOnly && (
+        {panelOpen && !historyOpen && !readOnly && !drawing && (
           <FormatPanel
             map={map}
             topic={selected}
@@ -1784,10 +1915,15 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
                         <button className="btn primary" onClick={() => enterInner()}>{t('inner.enter')}</button>
                         <button className="btn" onClick={commands.innerToBranch.run}>{t('inner.toBranch')}</button>
                       </>
-                    ) : canMakeInner ? (
-                      <button className="btn" onClick={commands.branchToInner.run}>{t('inner.toInner')}</button>
                     ) : (
-                      <button className="btn" onClick={commands.addInner.run}>{t('inner.add')}</button>
+                      <>
+                        {canMakeInner ? (
+                          <button className="btn" onClick={commands.branchToInner.run}>{t('inner.toInner')}</button>
+                        ) : (
+                          <button className="btn" onClick={commands.addInner.run}>{t('inner.add')}</button>
+                        )}
+                        <button className="btn" onClick={commands.addCanvas.run}>{t('canvas.add')}</button>
+                      </>
                     )}
                   </div>
                 </section>
