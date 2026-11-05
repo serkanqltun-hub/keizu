@@ -9,6 +9,7 @@ import { getTheme } from '../core/themes';
 import { t } from '../i18n';
 import { MapSvg } from './MapSvg';
 import { canvasMeasure } from './measure';
+import { RichNote } from './RichNote';
 
 interface Props {
   map: MindMap;
@@ -146,7 +147,9 @@ export function Presentation({ map, startId, onClose }: Props) {
         <MapSvg map={full} layout={layout} theme={theme} dimIds={dim} selectedId={current} />
       </svg>
       {currentNote && (
-        <div className="present-note" aria-label={t('note.presentLabel')}>{currentNote}</div>
+        <div className="present-note" aria-label={t('note.presentLabel')}>
+          <RichNote md={currentNote} />
+        </div>
       )}
       <div className="present-bar">
         <button className="ib" aria-label={t('present.prev')} title={t('present.prev')} disabled={i === 0} onClick={() => go(i - 1)}>‹</button>

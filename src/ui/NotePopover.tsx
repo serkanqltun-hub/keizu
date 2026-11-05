@@ -1,10 +1,14 @@
 // A card next to a topic on the canvas for reading and writing its note.
-// The draft is saved when the card closes, so one note edit is one undo step.
+// Notes are Markdown: the card shows them formatted, and editing shows the
+// Markdown with a formatting bar. The draft is saved when the card closes,
+// so one note edit is one undo step.
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { NodeBox } from '../core/layout';
+import { toggleTask } from '../core/richText';
 import { t } from '../i18n';
 import * as I from './Icons';
+import { NoteEditor, RichNote } from './RichNote';
 
 export interface NoteSave {
   note: string;
@@ -18,17 +22,20 @@ interface Props {
   /** Canvas size in pixels, to keep the card on screen. */
   size: { w: number; h: number };
   readOnly?: boolean;
+  /** Open straight in the editor (F4, toolbar); otherwise a note opens formatted. */
+  edit?: boolean;
   onSave(save: NoteSave): void;
   onClose(): void;
 }
 
-const CARD_W = 300;
+const CARD_W = 320;
 const GAP = 10;
 
-export function NotePopover({ box, view, size, readOnly, onSave, onClose }: Props) {
+export function NotePopover({ box, view, size, readOnly, edit, onSave, onClose }: Props) {
   const topic = box.topic;
   const [note, setNote] = useState(topic.note ?? '');
   const [showNote, setShowNote] = useState(!!topic.style?.showNote);
+  const [editing, setEditing] = useState(!readOnly && (!!edit || !note.trim()));
   const ta = useRef<HTMLTextAreaElement>(null);
   const card = useRef<HTMLDivElement>(null);
   const [cardH, setCardH] = useState(220);
@@ -45,10 +52,14 @@ export function NotePopover({ box, view, size, readOnly, onSave, onClose }: Prop
 
   useLayoutEffect(() => {
     const el = ta.current;
-    if (!el) return;
+    if (!el) {
+      // Formatted view: focus the card so Esc and Enter work.
+      card.current?.focus();
+      return;
+    }
     el.focus();
     el.setSelectionRange(el.value.length, el.value.length);
-  }, []);
+  }, [editing]);
 
   // Grow the text field with its content, up to a limit.
   useLayoutEffect(() => {
@@ -58,7 +69,7 @@ export function NotePopover({ box, view, size, readOnly, onSave, onClose }: Prop
       el.style.height = `${Math.min(320, Math.max(96, el.scrollHeight + 2))}px`;
     }
     if (card.current) setCardH(card.current.offsetHeight);
-  }, [note]);
+  }, [note, editing]);
 
   // Below the topic if it fits, otherwise above; always inside the canvas.
   const left = Math.max(8, Math.min(size.w - CARD_W - 8, view.x + (box.x - box.w / 2) * view.k));
@@ -74,6 +85,7 @@ export function NotePopover({ box, view, size, readOnly, onSave, onClose }: Prop
       className="note-pop"
       role="dialog"
       aria-label={t('note.dialog', { topic: title })}
+      tabIndex={-1}
       style={{ left, top, width: CARD_W }}
       onPointerDown={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
@@ -82,25 +94,55 @@ export function NotePopover({ box, view, size, readOnly, onSave, onClose }: Prop
         if (e.key === 'Escape' || (e.key === 'Enter' && (e.ctrlKey || e.metaKey))) {
           e.preventDefault();
           onClose();
+        } else if (!editing && !readOnly && (e.key === 'Enter' || e.key === 'F2') && e.target === card.current) {
+          e.preventDefault();
+          setEditing(true);
         }
       }}
     >
       <div className="note-pop-head">
         <I.NoteIcon size={15} />
         <span className="note-pop-title" title={title}>{title}</span>
+        {!readOnly && !!note.trim() && (
+          <button
+            className={`ib note-pop-mode${editing ? ' on' : ''}`}
+            aria-pressed={editing}
+            title={editing ? t('note.previewTip') : t('note.editTip')}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setEditing(!editing)}
+          >
+            {editing ? t('note.preview') : t('note.edit')}
+          </button>
+        )}
         <button className="ib" aria-label={t('note.close')} title={t('note.closeTip')} onClick={onClose}>✕</button>
       </div>
-      {readOnly ? (
-        <div className="note-pop-read">{note || <span className="muted">{t('note.empty')}</span>}</div>
-      ) : (
+      {!editing ? (
+        <div
+          className="note-pop-read"
+          onClick={(e) => {
+            // Clicking the text (not a link or checkbox) starts editing.
+            if (readOnly || (e.target as Element).closest('a, input')) return;
+            setEditing(true);
+          }}
+        >
+          {note.trim() ? (
+            <RichNote md={note} onToggle={readOnly ? undefined : (line) => setNote((n) => toggleTask(n, line))} />
+          ) : (
+            <span className="muted">{t('note.empty')}</span>
+          )}
+        </div>
+      ) : null}
+      {!readOnly && (
         <>
-          <textarea
-            ref={ta}
-            aria-label={t('panel.note')}
-            placeholder={t('panel.notePlaceholder')}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
+          {editing && (
+            <NoteEditor
+              ref={ta}
+              ariaLabel={t('panel.note')}
+              placeholder={t('panel.notePlaceholder')}
+              value={note}
+              onChange={setNote}
+            />
+          )}
           <div className="note-pop-foot">
             <label className="check">
               <input type="checkbox" checked={showNote} disabled={!note.trim()} onChange={(e) => setShowNote(e.target.checked)} />
@@ -112,7 +154,7 @@ export function NotePopover({ box, view, size, readOnly, onSave, onClose }: Prop
                 onClick={() => {
                   setNote('');
                   setShowNote(false);
-                  ta.current?.focus();
+                  setEditing(true);
                 }}
               >
                 {t('note.clear')}

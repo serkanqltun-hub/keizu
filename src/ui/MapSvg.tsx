@@ -1,7 +1,8 @@
 // Pure rendering of a laid-out map. Used both by the live canvas and by the
 // SVG/PNG exporters, so what you export is exactly what you see.
 
-import { BOUNDARY_LABEL_H, BOUNDARY_PAD, BRACKET_GAP, BRACKET_W, META_BAR_W, META_CHIP_H, META_FONT, META_ICON_W, NOTE_GAP, edgeShape, flowEdgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
+import { BOUNDARY_LABEL_H, BOUNDARY_PAD, BRACKET_GAP, BRACKET_W, META_BAR_W, META_CHIP_H, META_FONT, META_ICON_W, NOTE_GAP, edgeShape, flowEdgeShape, relationPath, type MapLayout, type NodeBox, type NoteBlock } from '../core/layout';
+import { notePlainText } from '../core/richText';
 import { FLAG_COLORS, MARKER_GAP, MARKER_SIZE, PRIORITY_COLORS } from '../core/markers';
 import type { MindMap } from '../core/model';
 import { isOverdue, tagColor, today } from '../core/tasks';
@@ -192,6 +193,71 @@ function LinkGlyph({ x, y, color, internal }: { x: number; y: number; color: str
   );
 }
 
+/** A note drawn inside its topic: rich text laid out by layoutNote. */
+function RichNoteSvg({ nb, x, y, w, color, bg }: { nb: NoteBlock; x: number; y: number; w: number; color: string; bg: string }) {
+  return (
+    <g transform={`translate(${x} ${y})`} fill={color} data-note-text="">
+      {nb.lines.map((l, i) => {
+        const dx = l.decoX ?? 0;
+        const m = l.mark;
+        const box = Math.round(l.fontSize * 0.85);
+        return (
+          <g key={i} fillOpacity={l.faint ? 0.55 : 0.8}>
+            {l.deco === 'code' && <rect x={dx} y={l.top} width={w - dx} height={l.h} fill={color} fillOpacity={0.07} />}
+            {l.deco === 'quote' && <rect x={dx} y={l.top + 1} width={2.5} height={l.h - 2} rx={1} fill={color} fillOpacity={0.35} />}
+            {l.deco === 'rule' && <path d={`M0 ${l.top + l.h / 2}H${w}`} stroke={color} strokeOpacity={0.25} strokeWidth={1} />}
+            {m?.kind === 'bullet' && <circle cx={m.x + l.fontSize * 0.4} cy={l.baseline - l.fontSize * 0.32} r={Math.max(1.6, l.fontSize * 0.14)} />}
+            {m?.kind === 'number' && (
+              <text x={m.x} y={l.baseline} fontFamily={FONT} fontSize={l.fontSize}>
+                {m.text}
+              </text>
+            )}
+            {m?.kind === 'check' && (
+              <g data-note-check={m.line} style={{ cursor: 'pointer' }}>
+                <rect x={m.x} y={l.baseline - l.fontSize * 0.35 - box / 2 - 0.5} width={box} height={box} rx={2.5} fill={m.checked ? color : 'transparent'} fillOpacity={m.checked ? 0.7 : 1} stroke={color} strokeOpacity={0.6} strokeWidth={1.2} />
+                {m.checked && (
+                  <path
+                    d={`M${m.x + box * 0.22} ${l.baseline - l.fontSize * 0.35}l${box * 0.2} ${box * 0.22}l${box * 0.38} ${-box * 0.42}`}
+                    transform={`translate(0 ${-0.5})`}
+                    fill="none"
+                    stroke={bg}
+                    strokeWidth={1.6}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                )}
+              </g>
+            )}
+            {l.runs.map((r, k) =>
+              r.code ? (
+                <rect key={`c${k}`} x={r.x - 2} y={l.baseline - l.fontSize * 0.95} width={r.w + 4} height={l.fontSize * 1.25} rx={3} fill={color} fillOpacity={l.deco === 'code' ? 0 : 0.09} />
+              ) : null,
+            )}
+            {l.runs.length > 0 && (
+              <text y={l.baseline} xmlSpace="preserve">
+                {l.runs.map((r, k) => {
+                  const deco = [r.href ? 'underline' : '', r.s || (m?.checked ?? false) ? 'line-through' : ''].filter(Boolean).join(' ');
+                  return (
+                    <tspan
+                      key={k}
+                      x={r.x}
+                      style={{ font: r.font }}
+                      textDecoration={deco || undefined}
+                      {...(r.href ? { 'data-note-href': r.href, cursor: 'pointer' } : {})}
+                    >
+                      {r.text}
+                    </tspan>
+                  );
+                })}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
 export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: NodeBox; theme: Theme; selected?: boolean; dimmed?: boolean; opacity?: number }) {
   const { fill, text } = nodeColors(b, theme);
   const s = b.topic.style ?? {};
@@ -265,16 +331,10 @@ export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: Node
       {nb && (
         <g>
           <path d={`M${b.padX} ${b.h - nb.h}H${b.w - b.padX}`} stroke={text} strokeOpacity={0.18} strokeWidth={1} />
-          <text x={b.padX} y={b.h - nb.h + NOTE_GAP + nb.lineHeight / 2 + nb.fontSize * 0.35} fontFamily={FONT} fontSize={nb.fontSize} fill={text} fillOpacity={0.78} data-note-text="">
-            {nb.lines.map((line, i) => (
-              <tspan key={i} x={b.padX} dy={i === 0 ? 0 : nb.lineHeight}>
-                {line || ' '}
-              </tspan>
-            ))}
-          </text>
+          <RichNoteSvg nb={nb} x={b.padX} y={b.h - nb.h + NOTE_GAP} w={b.w - b.padX * 2} color={text} bg={fill && fill !== 'none' && fill !== 'transparent' ? fill : theme.canvas} />
         </g>
       )}
-      {b.topic.note && <NoteGlyph x={b.w - b.padX - MARKER_SIZE} y={iconY} color={text} note={b.topic.note} />}
+      {b.topic.note && <NoteGlyph x={b.w - b.padX - MARKER_SIZE} y={iconY} color={text} note={notePlainText(b.topic.note)} />}
       {b.topic.href && (
         <LinkGlyph
           x={b.w - b.padX - MARKER_SIZE * (b.topic.note ? 2 : 1) - (b.topic.note ? MARKER_GAP : 0)}

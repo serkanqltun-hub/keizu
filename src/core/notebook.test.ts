@@ -21,7 +21,7 @@ describe('notebook mode', () => {
     const on = layoutMap(setMapProps(map, { notebook: true }), approxMeasure);
     const card = on.byId.get(noted)!;
     expect(card.noteBlock!.lines).toHaveLength(40);
-    expect(card.noteBlock!.lines.at(-1)).not.toMatch(/…$/);
+    expect(card.noteBlock!.lines.at(-1)!.runs.at(-1)!.text).not.toMatch(/…$/);
     expect(card.shape).toBe('rounded');
     // Topics without a note are left as they were.
     expect(on.byId.get(plain)!.h).toBe(off.byId.get(plain)!.h);
