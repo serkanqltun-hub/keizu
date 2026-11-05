@@ -424,3 +424,21 @@ mark { background: color-mix(in srgb, #ffd43b 55%, transparent); color: inherit;
 @media (max-width: 1600px) { .topbar .tb-right .btn { font-size: 0; gap: 0; padding: 0 10px; } .layout-switch, .layout-switch + .tb-sep, .tb-sep:has(+ .layout-switch) { display: none; } }
 @media (max-width: 900px) { .topbar { flex-wrap: wrap; } .topbar .tb-center { flex-wrap: wrap; } }
 .topbar .doc-title { max-width: 200px; }
+
+/* Motion (signature UI): instant 120 ms, smooth 220 ms, layout 360 ms, birth 420 ms */
+:root { --dur-instant: 120ms; --dur-smooth: 220ms; --dur-layout: 360ms; --ease: cubic-bezier(0.2, 0.8, 0.2, 1); --ease-spring: cubic-bezier(0.34, 1.32, 0.64, 1); }
+.ib, .btn, .tb, .rb, .seg button, .seg-tabs button, .o-row, .op-foot, .sb-lang, .menu button { transition: background-color var(--dur-instant) ease-out, color var(--dur-instant) ease-out, border-color var(--dur-instant) ease-out, transform var(--dur-instant) ease-out; }
+.ib:active:not(:disabled), .btn:active:not(:disabled), .tb:active:not(:disabled), .rb:active:not(:disabled) { transform: scale(0.96); }
+@keyframes kz-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes kz-slide-left { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: none; } }
+@keyframes kz-slide-right { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: none; } }
+@keyframes kz-pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
+.outline-panel { animation: kz-slide-left var(--dur-smooth) var(--ease); }
+.panel { animation: kz-slide-right var(--dur-smooth) var(--ease); }
+.menu, .note-pop, .toast { animation: kz-pop var(--dur-smooth) var(--ease); }
+.toast { animation-name: kz-fade; }
+[data-selection] { animation: kz-fade var(--dur-instant) ease-out; }
+@media (prefers-reduced-motion: reduce) { html:not(.kz-motion-full) * { animation: none !important; transition: none !important; } }
+html.kz-reduce-motion * { animation: none !important; transition: none !important; }
+button.nav-item { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
+button.nav-item:hover:not(.on) { background: var(--soft); }

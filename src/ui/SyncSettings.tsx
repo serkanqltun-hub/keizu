@@ -8,6 +8,7 @@ import type { ConflictPolicy, SyncEvent } from '../sync/engine';
 import { discover, login, pair, KeizuServerAdapter, type ServerInfo } from '../sync/keizuServer';
 import * as I from './Icons';
 import { isDesktop } from './platform';
+import { setMotionPrefs, useMotionPrefs, type MotionMode, type WheelMode } from './motion';
 
 export const GUIDE_URL = 'https://github.com/serkanqltun-hub/keizu/blob/main/docs/server/hetzner.md';
 export const INSTALL_CMD = 'curl -fsSL https://raw.githubusercontent.com/serkanqltun-hub/keizu/main/server/deploy/install.sh | sudo bash';
@@ -368,6 +369,7 @@ function Activity({ items }: { items: SyncEvent[] }) {
 
 export function SyncSettings({ onBack, link }: Props) {
   const { config, prefs, activity } = useSync();
+  const [page, setPage] = useState<'sync' | 'motion'>('sync');
   return (
     <div className="settings">
       <aside className="settings-side">
@@ -376,11 +378,19 @@ export function SyncSettings({ onBack, link }: Props) {
         </button>
         <span className="settings-title">{t('settings.title')}</span>
         <nav aria-label={t('settings.title')}>
-          <span className="nav-item on">
+          <button className={`nav-item ${page === 'sync' ? 'on' : ''}`} aria-current={page === 'sync' ? 'page' : undefined} onClick={() => setPage('sync')}>
             <I.Cloud size={16} /> {t('sync.title')}
-          </span>
+          </button>
+          <button className={`nav-item ${page === 'motion' ? 'on' : ''}`} aria-current={page === 'motion' ? 'page' : undefined} onClick={() => setPage('motion')}>
+            <I.MapIcon size={16} /> {t('motion.title')}
+          </button>
         </nav>
       </aside>
+      {page === 'motion' ? (
+        <main className="settings-main">
+          <MotionSettings />
+        </main>
+      ) : (
       <main className="settings-main">
         <div>
           <h1>{t('sync.title')}</h1>
@@ -418,7 +428,45 @@ export function SyncSettings({ onBack, link }: Props) {
         {config && <EncryptionCard />}
         {config && <Activity items={activity} />}
       </main>
+      )}
     </div>
+  );
+}
+
+/** How the canvas moves: the mouse wheel and animations. */
+function MotionSettings() {
+  const p = useMotionPrefs();
+  return (
+    <>
+      <div>
+        <h1>{t('motion.title')}</h1>
+        <p className="muted">{t('motion.intro')}</p>
+      </div>
+      <section className="set-card">
+        <label className="set-row">
+          <span>
+            <strong>{t('motion.wheel')}</strong>
+            <span className="muted small">{t('motion.wheelHint')}</span>
+          </span>
+          <select className="fld" value={p.wheel} onChange={(e) => setMotionPrefs({ wheel: e.target.value as WheelMode })}>
+            <option value="zoom">{t('motion.wheel.zoom')}</option>
+            <option value="pan">{t('motion.wheel.pan')}</option>
+          </select>
+        </label>
+        <div className="set-sep" />
+        <label className="set-row">
+          <span>
+            <strong>{t('motion.anim')}</strong>
+            <span className="muted small">{t('motion.animHint')}</span>
+          </span>
+          <select className="fld" value={p.motion} onChange={(e) => setMotionPrefs({ motion: e.target.value as MotionMode })}>
+            <option value="system">{t('motion.anim.system')}</option>
+            <option value="full">{t('motion.anim.full')}</option>
+            <option value="reduced">{t('motion.anim.reduced')}</option>
+          </select>
+        </label>
+      </section>
+    </>
   );
 }
 

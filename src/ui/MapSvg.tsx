@@ -120,7 +120,7 @@ function LinkGlyph({ x, y, color, internal }: { x: number; y: number; color: str
   );
 }
 
-export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: Theme; selected?: boolean; dimmed?: boolean }) {
+export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: NodeBox; theme: Theme; selected?: boolean; dimmed?: boolean; opacity?: number }) {
   const { fill, text } = nodeColors(b, theme);
   const s = b.topic.style ?? {};
   const markers = b.topic.markers ?? [];
@@ -142,7 +142,7 @@ export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: T
   const weight = /(\d{3})/.exec(b.font)?.[1] ?? '400';
 
   return (
-    <g transform={`translate(${b.x - b.w / 2} ${b.y - b.h / 2})`} opacity={dimmed ? 0.35 : 1} data-topic-id={b.id}>
+    <g transform={`translate(${b.x - b.w / 2} ${b.y - b.h / 2})`} opacity={(dimmed ? 0.35 : 1) * opacity} data-topic-id={b.id}>
       {selected && (
         <rect x={-4} y={-4} width={b.w + 8} height={b.h + 8} rx={rx + 3} fill="none" stroke={selColor} strokeWidth={sig ? 1.5 : 2} data-selection="" />
       )}
@@ -301,9 +301,11 @@ interface MapSvgProps {
   viewport?: Rect;
   /** Zoomed far out on a big map: plain shapes, no text, few DOM nodes. */
   simple?: boolean;
+  /** Topics fading in or out during a layout change, by id. */
+  fade?: Map<string, number>;
 }
 
-export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, viewport, simple }: MapSvgProps) {
+export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, viewport, simple, fade }: MapSvgProps) {
   const vis = visibleIn(layout, viewport);
   if (simple) return <SimpleMap map={map} layout={layout} theme={theme} nodes={vis.nodes} edges={vis.edges} selectedId={selectedId} />;
   return (
@@ -315,12 +317,12 @@ export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, 
           const { d } = edgeShape(p, c, map.branchStyle);
           const main = c.depth === 1 || p.flow === 'fishbone';
           const width = theme.signature ? (main ? 1.8 : 1.3) : main ? 2.5 : 1.5;
-          return <path key={c.id} d={d} stroke={c.color} strokeWidth={width} strokeLinejoin="round" opacity={dimIds?.has(c.id) ? 0.35 : 1} />;
+          return <path key={c.id} d={d} stroke={c.color} strokeWidth={width} strokeLinejoin="round" opacity={(dimIds?.has(c.id) ? 0.35 : 1) * (fade?.get(c.id) ?? 1)} />;
         })}
       </g>
       <LinkLabels map={map} layout={layout} edges={vis.edges} theme={theme} />
       {vis.nodes.map((b) => (
-        <TopicView key={b.id} b={b} theme={theme} selected={b.id === selectedId} dimmed={dimIds?.has(b.id)} />
+        <TopicView key={b.id} b={b} theme={theme} selected={b.id === selectedId} dimmed={dimIds?.has(b.id)} opacity={fade?.get(b.id) ?? 1} />
       ))}
       {vis.nodes.map((b) => (
         <CollapseBadge key={`c-${b.id}`} b={b} theme={theme} />
