@@ -29,6 +29,7 @@ export type CommandId =
   | 'navUp'
   | 'navDown'
   | 'relation'
+  | 'merge'
   | 'floating'
   | 'note'
   | 'save'
@@ -78,6 +79,8 @@ export const COMMANDS: CommandDef[] = [
   { id: 'indent', keys: ['Tab'], outlineOnly: true, group: 'edit' },
   { id: 'outdent', keys: ['Shift+Tab'], outlineOnly: true, group: 'edit' },
   { id: 'relation', keys: [], group: 'edit' },
+  // Ctrl+Tab belongs to the browser (switching tabs): Alt+B works everywhere.
+  { id: 'merge', keys: ['Mod+Tab', 'Alt+B'], group: 'edit' },
   { id: 'floating', keys: [], group: 'edit' },
   { id: 'note', keys: ['F4'], group: 'edit' },
   { id: 'navLeft', keys: ['ArrowLeft'], group: 'navigate' },

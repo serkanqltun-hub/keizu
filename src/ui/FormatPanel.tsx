@@ -43,6 +43,7 @@ const LAYOUTS: { id: LayoutKind; d: string }[] = [
   { id: 'timeline', d: 'M11 14h27M17 14v-6h5M26 14v6h5M35 14v-6' },
   { id: 'fishbone', d: 'M27 14H3M22 14l-5-9M22 14l-5 9M12 14L7 5M12 14l-5 9' },
   { id: 'matrix', d: 'M14 3h24v22H14zM22 3v22M30 3v22M14 10h24M14 17h24' },
+  { id: 'flow', d: 'M9 14h3M12 6v16M12 6h3M12 22h3M23 6h2v8M23 22h2v-8M25 14h4' },
 ];
 
 const BRANCHES: BranchStyle[] = ['curve', 'elbow', 'straight'];
@@ -56,6 +57,14 @@ function LayoutGlyph({ id, d }: { id: LayoutKind; d: string }) {
       {id === 'timeline' && <rect x="1" y="11" width="10" height="6" rx="2" />}
       {id === 'fishbone' && <rect x="27" y="11" width="11" height="6" rx="2" />}
       {id === 'matrix' && <rect x="3" y="3" width="10" height="7" rx="1" />}
+      {id === 'flow' && (
+        <>
+          <rect x="1" y="11" width="8" height="6" rx="2" />
+          <rect x="15" y="3" width="8" height="6" rx="2" />
+          <rect x="15" y="19" width="8" height="6" rx="2" />
+          <rect x="29" y="11" width="9" height="6" rx="2" />
+        </>
+      )}
       <path d={d} />
     </svg>
   );
@@ -122,6 +131,7 @@ function TopicSection({
   const [note, setNote] = useState(topic.note ?? '');
   useEffect(() => setNote(topic.note ?? ''), [topic.note]);
   const [linkLabel, setLinkLabel] = useState(topic.linkLabel ?? '');
+  const inFlow = (topic.layout ?? inheritedLayout) === 'flow';
   useEffect(() => setLinkLabel(topic.linkLabel ?? ''), [topic.linkLabel]);
   const internal = topic.href?.startsWith('keizu:') ? topic.href : '';
   const [url, setUrl] = useState(internal ? '' : topic.href ?? '');
@@ -232,10 +242,10 @@ function TopicSection({
         <h3 className="lbl">{t('panel.link')}</h3>
         {!isRoot && (
           <label className="field">
-            <span className="small muted">{t('panel.linkLabel')}</span>
+            <span className="small muted">{t(inFlow ? 'panel.flowLabel' : 'panel.linkLabel')}</span>
             <input
               value={linkLabel}
-              placeholder={t('panel.linkLabelPlaceholder')}
+              placeholder={t(inFlow ? 'panel.flowPlaceholder' : 'panel.linkLabelPlaceholder')}
               onChange={(e) => setLinkLabel(e.target.value)}
               onBlur={() => linkLabel.trim() !== (topic.linkLabel ?? '') && onLinkLabel(linkLabel.trim())}
               onKeyDown={(e) => {
@@ -334,14 +344,14 @@ function RelationSection({ relation, onLabel, onDelete }: { relation: Relation; 
   const [label, setLabel] = useState(relation.label ?? '');
   return (
     <section>
-      <h3 className="lbl">{t('panel.relation')}</h3>
+      <h3 className="lbl">{t(relation.kind === 'flow' ? 'panel.flowLink' : 'panel.relation')}</h3>
       <label className="field">
         <span className="muted">{t('panel.label2')}</span>
         <input
           id="relation-label"
           className="text-input"
           value={label}
-          placeholder={t('panel.relationPlaceholder')}
+          placeholder={t(relation.kind === 'flow' ? 'panel.flowPlaceholder' : 'panel.relationPlaceholder')}
           onChange={(e) => setLabel(e.target.value)}
           onBlur={() => label !== (relation.label ?? '') && onLabel(label.trim())}
           onKeyDown={(e) => {
