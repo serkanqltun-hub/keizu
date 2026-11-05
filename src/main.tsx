@@ -10,6 +10,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
 import { PublicView, viewToken } from './ui/PublicView';
+import { UpdatePrompt } from './ui/updates';
 
 // The drawing canvas loads its fonts from the app itself (see vite.config.ts), never a CDN.
 (window as unknown as { EXCALIDRAW_ASSET_PATH: string }).EXCALIDRAW_ASSET_PATH = new URL(`${import.meta.env.BASE_URL}excalidraw/`, location.href).href;
@@ -27,5 +28,8 @@ document.addEventListener('contextmenu', (e) => {
 const token = viewToken();
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>{token ? <PublicView token={token} /> : <App />}</StrictMode>,
+  <StrictMode>
+    {token ? <PublicView token={token} /> : <App />}
+    <UpdatePrompt />
+  </StrictMode>,
 );

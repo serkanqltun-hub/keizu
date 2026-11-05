@@ -12,7 +12,7 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 ## Kullanmaya başla
 
 - **Tarayıcıda:** https://serkanqltun-hub.github.io/keizu/ (kurulum yok, haritalar tarayıcında kalır)
-- **Masaüstü:** Windows, macOS ve Linux sürümleri [Releases](https://github.com/serkanqltun-hub/keizu/releases) sayfasında
+- **Masaüstü:** Windows, macOS ve Linux sürümleri [Releases](https://github.com/serkanqltun-hub/keizu/releases) sayfasında. Kurulduktan sonra yeni sürümleri kendisi bulur ve kurmayı önerir ([sürüm yayınlama](docs/desktop/surum-yayinlama.md))
 - **Kendi sunucunla:** Keizu Server kurduysan uygulama sunucunun adresinde açılır (ör. `https://keizu.alanadin.com`)
 
 ## Durum

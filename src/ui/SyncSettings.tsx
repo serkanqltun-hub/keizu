@@ -8,6 +8,7 @@ import type { ConflictPolicy, SyncEvent } from '../sync/engine';
 import { discover, login, pair, KeizuServerAdapter, type ServerInfo } from '../sync/keizuServer';
 import * as I from './Icons';
 import { isDesktop } from './platform';
+import { UpdateSettings, updatesTitle } from './updates';
 import { setMotionPrefs, useMotionPrefs, type MotionMode, type WheelMode } from './motion';
 
 export const GUIDE_URL = 'https://github.com/serkanqltun-hub/keizu/blob/main/docs/server/hetzner.md';
@@ -369,7 +370,7 @@ function Activity({ items }: { items: SyncEvent[] }) {
 
 export function SyncSettings({ onBack, link }: Props) {
   const { config, prefs, activity } = useSync();
-  const [page, setPage] = useState<'sync' | 'motion'>('sync');
+  const [page, setPage] = useState<'sync' | 'motion' | 'updates'>('sync');
   return (
     <div className="settings">
       <aside className="settings-side">
@@ -384,9 +385,18 @@ export function SyncSettings({ onBack, link }: Props) {
           <button className={`nav-item ${page === 'motion' ? 'on' : ''}`} aria-current={page === 'motion' ? 'page' : undefined} onClick={() => setPage('motion')}>
             <I.MapIcon size={16} /> {t('motion.title')}
           </button>
+          {isDesktop && (
+            <button className={`nav-item ${page === 'updates' ? 'on' : ''}`} aria-current={page === 'updates' ? 'page' : undefined} onClick={() => setPage('updates')}>
+              <I.Import size={16} /> {updatesTitle()}
+            </button>
+          )}
         </nav>
       </aside>
-      {page === 'motion' ? (
+      {page === 'updates' ? (
+        <main className="settings-main">
+          <UpdateSettings />
+        </main>
+      ) : page === 'motion' ? (
         <main className="settings-main">
           <MotionSettings />
         </main>

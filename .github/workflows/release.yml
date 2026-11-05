@@ -1,25 +1,65 @@
 name: Release
 
-# Push a tag like v0.1.0 to build installers for Windows, macOS and Linux
-# and attach them to a draft GitHub release.
+# Push a tag like v0.2.0 to build the desktop installers, sign the update
+# packages and publish a GitHub release with latest.json. Installed apps read
+# https://github.com/serkanqltun-hub/keizu/releases/latest/download/latest.json
+# to find updates, so the release is published (not left as a draft) once
+# every platform has finished.
+#
+# Needs two repository secrets (Settings → Secrets and variables → Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           the updater private key (file content)
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password
+# The matching public key is in src-tauri/tauri.conf.json → plugins.updater.
 on:
   push:
     tags: ['v*']
 
+permissions:
+  contents: write
+
 jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      id: ${{ steps.release.outputs.result }}
+    steps:
+      - name: Check the signing key is set
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY secret is missing. Add it in Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+      - id: release
+        uses: actions/github-script@v7
+        with:
+          result-encoding: string
+          script: |
+            const tag = context.ref.replace('refs/tags/', '');
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: tag,
+              name: `Keizu ${tag}`,
+              body: 'Keizu açık olduğunda bu sürümü kendisi bulur ve kurmayı önerir. İlk kurulum için aşağıdan işletim sistemine uygun dosyayı indir.\n\nKeizu finds this version by itself and offers to install it. For a first install, download the file for your system below.',
+              draft: true,
+            });
+            return String(data.id);
+
   build:
-    permissions:
-      contents: write
+    needs: create-release
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-22.04
-            args: ''
+          # MSI is skipped: WiX rejects the Turkish text in the app metadata.
           - os: windows-latest
-            args: ''
+            args: '--bundles nsis'
+          - os: ubuntu-22.04
+            args: '--bundles deb,rpm,appimage'
           - os: macos-latest
-            args: '--target universal-apple-darwin'
+            args: '--target universal-apple-darwin --bundles app,dmg'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -36,11 +76,56 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev patchelf
       - run: npm ci
+      # The tag is the version: v0.2.0 builds Keizu 0.2.0, so the updater
+      # can compare it with the installed one. Signed update packages are
+      # only made here, so local builds work without the private key.
+      - name: Set the version and turn on update packages
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          node -e "
+            const fs = require('fs');
+            const p = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            c.version = process.argv[1];
+            c.bundle.createUpdaterArtifacts = true;
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');
+          " "$version"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Keizu ${{ github.ref_name }}
-          releaseDraft: true
+          releaseId: ${{ needs.create-release.outputs.id }}
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}
+
+  # Publishes even when one platform failed, as long as latest.json made it,
+  # so a macOS or Linux hiccup doesn't hold back Windows updates.
+  publish:
+    needs: [create-release, build]
+    if: ${{ !cancelled() && needs.create-release.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          RELEASE_ID: ${{ needs.create-release.outputs.id }}
+        with:
+          script: |
+            const assets = await github.paginate(github.rest.repos.listReleaseAssets, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.RELEASE_ID),
+            });
+            if (!assets.some((a) => a.name === 'latest.json')) {
+              core.setFailed('No latest.json in the release: every build failed. The draft is left for you to inspect.');
+              return;
+            }
+            await github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: Number(process.env.RELEASE_ID),
+              draft: false,
+            });
