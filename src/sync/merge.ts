@@ -5,10 +5,11 @@
 // one side but edited on the other, or the result would no longer be a tree,
 // the merge gives up (null) and the caller keeps a conflicting copy instead.
 
-import type { MindMap, Relation, Topic } from '../core/model';
+import { mergeCanvas } from '../core/canvas';
+import { canvasFiles, type MindMap, type Relation, type Topic } from '../core/model';
 
-const TOPIC_FIELDS = ['text', 'image', 'pos', 'layout', 'note', 'markers', 'collapsed', 'style', 'linkLabel', 'href', 'boundaries', 'summaries'] as const;
-const MAP_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor', 'notebook'] as const;
+const TOPIC_FIELDS = ['text', 'image', 'pos', 'layout', 'note', 'markers', 'collapsed', 'style', 'linkLabel', 'href', 'boundaries', 'summaries', 'inside', 'innerLayout', 'innerKind'] as const;
+const MAP_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor', 'notebook', 'canvasMode'] as const;
 const ROOT = '\u0000root';
 
 interface Flat {
@@ -85,6 +86,9 @@ function mergeTopic(b: Flat | undefined, l: Flat | undefined, r: Flat | undefine
     const src = k === l.fields[f] ? l.topic : r.topic;
     if (src[f] !== undefined) topic[f] = src[f];
   }
+  // Drawings merge shape by shape, so they never conflict.
+  const canvas = mergeCanvas(b.topic.canvas, l.topic.canvas, r.topic.canvas);
+  if (canvas) topic.canvas = canvas;
   return { parent, fields, topic: topic as Flat['topic'] };
 }
 
@@ -169,8 +173,14 @@ export function mergeMaps(base: MindMap, local: MindMap, remote: MindMap): MindM
     const out: MindMap = { ...remote, roots };
     for (const f of MAP_FIELDS) (out as unknown as Record<string, unknown>)[f] = pick(base[f], local[f], remote[f], eq);
     out.relations = mergeRelations(base.relations, local.relations, remote.relations, merged);
+    const canvas = mergeCanvas(base.canvas, local.canvas, remote.canvas);
+    if (canvas) out.canvas = canvas;
+    else delete out.canvas;
+    if (!out.canvasMode) delete out.canvasMode;
     const resources = { ...remote.resources, ...local.resources };
-    const used = new Set([...merged.values()].map((f) => f.topic.image?.res).filter(Boolean));
+    const used = new Set<string | undefined>([...merged.values()].map((f) => f.topic.image?.res));
+    for (const f of merged.values()) canvasFiles(f.topic.canvas, used as Set<string>);
+    canvasFiles(canvas, used as Set<string>);
     const kept = Object.fromEntries(Object.entries(resources).filter(([k]) => used.has(k)));
     if (Object.keys(kept).length) out.resources = kept;
     else delete out.resources;

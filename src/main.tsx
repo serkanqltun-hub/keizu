@@ -11,6 +11,9 @@ import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
 import { PublicView, viewToken } from './ui/PublicView';
 
+// The drawing canvas loads its fonts from the app itself (see vite.config.ts), never a CDN.
+(window as unknown as { EXCALIDRAW_ASSET_PATH: string }).EXCALIDRAW_ASSET_PATH = new URL(`${import.meta.env.BASE_URL}excalidraw/`, location.href).href;
+
 // No browser / webview context menu (Back, Reload, Inspect…): Keizu shows
 // its own on the map. Text fields keep the native one for copy, paste and
 // spelling.
