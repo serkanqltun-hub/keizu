@@ -117,6 +117,9 @@ const NOTE_MIN_W = 180;
 const NOTE_MAX_W = 320;
 /** A shown note longer than this is cut, with "…" at the end. */
 const NOTE_MAX_LINES = 12;
+/** Notebook mode shows whole notes, in wider cards. */
+const NOTEBOOK_MIN_W = 260;
+const NOTEBOOK_MAX_W = 420;
 
 /** Breaks text into lines no wider than maxW, at spaces where it can. */
 export function wrapText(text: string, font: string, maxW: number, measure: Measure): string[] {
@@ -145,14 +148,16 @@ export function wrapText(text: string, font: string, maxW: number, measure: Meas
   return out;
 }
 
-function noteBlockFor(t: Topic, fontSize: number, padY: number, contentW: number, measure: Measure): NoteBlock | undefined {
-  const note = t.style?.showNote ? t.note?.trim() : undefined;
+function noteBlockFor(t: Topic, fontSize: number, padY: number, contentW: number, measure: Measure, notebook = false): NoteBlock | undefined {
+  const note = notebook || t.style?.showNote ? t.note?.trim() : undefined;
   if (!note) return;
-  const size = Math.max(11, Math.round(fontSize * 0.8));
+  const size = Math.max(notebook ? 12 : 11, Math.round(fontSize * (notebook ? 0.86 : 0.8)));
   const font = `400 ${size}px ${FONT_FAMILY}`;
-  const maxW = Math.min(NOTE_MAX_W, Math.max(NOTE_MIN_W, contentW));
+  const maxW = notebook
+    ? Math.min(NOTEBOOK_MAX_W, Math.max(NOTEBOOK_MIN_W, contentW))
+    : Math.min(NOTE_MAX_W, Math.max(NOTE_MIN_W, contentW));
   let lines = wrapText(note, font, maxW, measure);
-  if (lines.length > NOTE_MAX_LINES) lines = [...lines.slice(0, NOTE_MAX_LINES - 1), `${lines[NOTE_MAX_LINES - 1]}…`];
+  if (!notebook && lines.length > NOTE_MAX_LINES) lines = [...lines.slice(0, NOTE_MAX_LINES - 1), `${lines[NOTE_MAX_LINES - 1]}…`];
   const lineHeight = Math.round(size * 1.4);
   return { lines, font, fontSize: size, lineHeight, h: NOTE_GAP + lines.length * lineHeight + padY };
 }
@@ -160,8 +165,15 @@ function noteBlockFor(t: Topic, fontSize: number, padY: number, contentW: number
 /** Room for the leading dot of signature-theme topics. */
 export const LEAD_DOT = 12;
 
-function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, resources?: Record<string, string>, signature = false) {
-  const m = metricsFor(depth, boxed, t, signature);
+function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, resources?: Record<string, string>, signature = false, notebook = false) {
+  // A topic shown as a notebook card is always a box.
+  const card = notebook && !!t.note?.trim();
+  const m = metricsFor(depth, boxed || card, t, signature);
+  if (card) {
+    m.padX = Math.max(m.padX, 14);
+    m.padY = Math.max(m.padY, 9);
+    if (m.shape === 'underline' || m.shape === 'none') m.shape = 'rounded';
+  }
   // Signature themes put a small dot before the text of boxed, non-central topics.
   const lead = signature && depth > 0 && (m.shape === 'rounded' || m.shape === 'pill' || m.shape === 'rect') ? LEAD_DOT : 0;
   const font = `${t.style?.italic ? 'italic ' : ''}${m.weight} ${m.fontSize}px ${FONT_FAMILY}`;
@@ -177,7 +189,7 @@ function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, res
     image = { href, w: Math.round(t.image.width * k), h: Math.round(t.image.height * k) };
   }
   const imageH = image ? image.h + IMAGE_GAP : 0;
-  const noteBlock = noteBlockFor(t, m.fontSize, m.padY, textW + iconW, measure);
+  const noteBlock = noteBlockFor(t, m.fontSize, m.padY, textW + iconW, measure, notebook);
   const noteW = noteBlock ? Math.max(...noteBlock.lines.map((l) => measure(l || ' ', noteBlock.font))) : 0;
   const w = Math.max(m.minW, Math.ceil(textW + iconW + lead + m.padX * 2), image ? image.w + m.padX * 2 : 0, Math.ceil(noteW + m.padX * 2));
   const h = Math.max(lines.length * lineHeight, icons ? MARKER_SIZE : 0) + m.padY * 2 + imageH + (noteBlock?.h ?? 0);
@@ -217,7 +229,7 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
     // central topic stays visually unique.
     const baseDepth = ri === 0 ? 0 : 1;
     const rootColor = ri === 0 ? theme.mono : palette(colorIndex++);
-    const tree = layoutTree(root, kind, baseDepth, rootColor, palette, theme.mono, measure, map.resources, theme.signature);
+    const tree = layoutTree(root, kind, baseDepth, rootColor, palette, theme.mono, measure, map.resources, theme.signature, !!map.notebook);
     let pos = root.pos;
     if (!pos && ri > 0) {
       // No stored position: park it under everything laid out so far.
@@ -268,6 +280,7 @@ function layoutTree(
   measure: Measure,
   resources?: Record<string, string>,
   signature = false,
+  notebook = false,
 ): { nodes: NodeBox[]; root: NodeBox; minY: number } {
   const nodes: NodeBox[] = [];
   const byId = new Map<string, NodeBox>();
@@ -277,7 +290,7 @@ function layoutTree(
   const build = (t: Topic, depth: number, color: string, inherited: LayoutKind, parentDown: boolean, parentId?: string) => {
     const own = t === root ? kind : t.layout ?? inherited;
     if (t !== root && t.layout) explicit.add(t.id);
-    const size = sizeNode(t, depth, signature || parentDown || BOXED.includes(own), measure, resources, signature);
+    const size = sizeNode(t, depth, signature || parentDown || BOXED.includes(own), measure, resources, signature, notebook);
     const hidden = t.collapsed && t.children.length ? countTopics(t) - 1 : 0;
     const box: NodeBox = { id: t.id, rootId: root.id, layout: own, flow: 'right', topic: t, parentId, depth, side: 0, x: 0, y: 0, color, hidden, ...size };
     nodes.push(box);

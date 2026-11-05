@@ -438,7 +438,11 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     const p = toMap(e.clientX, e.clientY);
     const topicId = (e.target as Element).closest('[data-topic-id]')?.getAttribute('data-topic-id') ?? (simple ? hitTest(p.x, p.y, null)?.id : undefined);
     if (props.readOnly) return;
-    if (topicId) props.onStartEdit(topicId);
+    // In a topic that shows its note, double-clicking the note edits the note.
+    if (topicId && (e.target as Element).closest('[data-note-text]') && props.onOpenNote) {
+      props.onSelect(topicId);
+      props.onOpenNote(topicId);
+    } else if (topicId) props.onStartEdit(topicId);
     else if (!(e.target as Element).closest('[data-relation-id]')) props.onCreateFloating(toMap(e.clientX, e.clientY));
   };
 

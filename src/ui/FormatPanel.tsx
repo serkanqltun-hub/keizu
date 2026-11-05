@@ -24,7 +24,7 @@ interface Props {
   onHref(href: string): void;
   /** Other maps in the library, for linking a topic to one. */
   maps: { id: string; title: string }[];
-  onMap(patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor'>>): void;
+  onMap(patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'notebook'>>): void;
 }
 
 const SHAPES: { id: TopicShape; css: React.CSSProperties }[] = [
@@ -320,6 +320,10 @@ function MapSection({ map, onMap }: { map: MindMap; onMap: Props['onMap'] }) {
         <label className="check">
           {t('panel.multicolor')}
           <input type="checkbox" checked={map.multicolor} onChange={(e) => onMap({ multicolor: e.target.checked })} />
+        </label>
+        <label className="check" title={t('tb.notebookTip')}>
+          {t('cmd.notebook')}
+          <input type="checkbox" checked={!!map.notebook} onChange={(e) => onMap({ notebook: e.target.checked })} />
         </label>
       </section>
     </>
