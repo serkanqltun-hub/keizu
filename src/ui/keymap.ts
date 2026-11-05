@@ -61,6 +61,9 @@ export type CommandId =
   | 'focus'
   | 'boundary'
   | 'summary'
+  | 'viewCanvas'
+  | 'viewBoth'
+  | 'addCanvas'
   | 'task'
   | 'tag'
   | 'filter'
@@ -133,6 +136,9 @@ export const COMMANDS: CommandDef[] = [
   { id: 'innerToBranch', keys: [], group: 'edit' },
   { id: 'addInner', keys: [], group: 'edit' },
   { id: 'insertMap', keys: [], group: 'edit' },
+  { id: 'addCanvas', keys: [], group: 'edit' },
+  { id: 'viewCanvas', keys: ['Mod+Alt+D'], group: 'view' },
+  { id: 'viewBoth', keys: [], group: 'view' },
   { id: 'share', keys: [], group: 'file' },
   { id: 'save', keys: ['Mod+S'], group: 'file' },
   { id: 'saveAs', keys: ['Mod+Shift+S'], group: 'file' },

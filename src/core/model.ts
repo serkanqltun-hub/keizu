@@ -79,6 +79,8 @@ export interface Topic {
    * own data and plug into the same enter/exit flow.
    */
   innerKind?: string;
+  /** Free drawing of this topic's inner view (see src/core/canvas.ts). */
+  canvas?: CanvasData;
   /** View only, never stored: how many topics the hidden inner map holds. */
   innerSize?: number;
   children: Topic[];
@@ -139,6 +141,10 @@ export interface MindMap {
    * topic, as a card. A view setting, saved with the map.
    */
   notebook?: boolean;
+  /** How the outer map is shown: unset for the map, or the drawing canvas. */
+  canvasMode?: CanvasMode;
+  /** Free drawing on the outer map (see src/core/canvas.ts). */
+  canvas?: CanvasData;
   /** roots[0] is the main topic; any others float on the canvas. */
   roots: Topic[];
   relations: Relation[];
@@ -147,6 +153,32 @@ export interface MindMap {
    * .keizu package they are stored as separate files under resources/.
    */
   resources?: Record<string, string>;
+}
+
+/** 'canvas': only the drawing; 'both': the drawing with the topics on it as shapes. */
+export type CanvasMode = 'canvas' | 'both';
+
+/**
+ * One drawn shape, line, text or picture, as the drawing editor (Excalidraw)
+ * stores it. Keizu only relies on these few fields; the rest is kept as is.
+ */
+export interface CanvasElement {
+  id: string;
+  type: string;
+  version: number;
+  /** Stacking order key (fractional index): plain string order. */
+  index?: string | null;
+  isDeleted?: boolean;
+  /** Pictures: key into MindMap.resources. */
+  fileId?: string | null;
+  [key: string]: unknown;
+}
+
+/** A free drawing: its shapes, plus where topics sit on it in "both" mode. */
+export interface CanvasData {
+  elements: CanvasElement[];
+  /** Top-left corner of each topic's shape, by topic id ("both" mode). */
+  topics?: Record<string, Point>;
 }
 
 let counter = 0;
@@ -475,7 +507,7 @@ export function toggleCollapse(map: MindMap, id: string): MindMap {
   return updateTopic(map, id, { collapsed: !t.collapsed });
 }
 
-export function setMapProps(map: MindMap, patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'title' | 'notebook'>>): MindMap {
+export function setMapProps(map: MindMap, patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'title' | 'notebook' | 'canvasMode'>>): MindMap {
   const next = { ...map, ...patch, updatedAt: new Date().toISOString() };
   if (!next.notebook) delete next.notebook;
   return next;
@@ -551,6 +583,12 @@ export function removeTopicImage(map: MindMap, id: string): MindMap {
   return mapTopic(map, id, (t) => ({ ...t, image: undefined }));
 }
 
+/** Adds the pictures a drawing shows to `out`. */
+export function canvasFiles(c: CanvasData | undefined, out: Set<string>): Set<string> {
+  for (const e of c?.elements ?? []) if (e.fileId && !e.isDeleted) out.add(e.fileId);
+  return out;
+}
+
 /**
  * Drops resources no topic points at any more. Done when writing a map out,
  * not on every edit, so undo and cut/paste keep their images.
@@ -560,10 +598,12 @@ export function pruneResources(map: MindMap): MindMap {
   const used = new Set<string>();
   const walk = (t: Topic) => {
     if (t.image) used.add(t.image.res);
+    canvasFiles(t.canvas, used);
     t.children.forEach(walk);
     t.summaries?.forEach((s) => walk(s.topic));
   };
   map.roots.forEach(walk);
+  canvasFiles(map.canvas, used);
   const keys = Object.keys(map.resources);
   if (keys.every((k) => used.has(k))) return map;
   const resources: Record<string, string> = {};

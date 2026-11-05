@@ -280,7 +280,10 @@ export function FilterBar({
   matches,
   onChange,
   onClose,
+  below,
 }: {
+  /** Something else holds the top right corner: sit under it. */
+  below?: boolean;
   tags: { tag: string; count: number }[];
   filter: TopicFilter;
   /** How many topics match, when a filter is set. */
@@ -290,7 +293,7 @@ export function FilterBar({
 }) {
   const on = (tag: string) => filter.tags.some((x) => fold(x) === fold(tag));
   return (
-    <div className="filter-bar" role="region" aria-label={t('filter.label')} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+    <div className="filter-bar" style={below ? { top: 62 } : undefined} role="region" aria-label={t('filter.label')} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
       <span className="fb-title"><I.FilterIcon size={15} />{t('filter.label')}</span>
       <div className="fb-tags">
         {tags.length ? (
