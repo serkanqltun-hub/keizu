@@ -9,6 +9,7 @@ export type { Point };
 import { countTopics, findTopic, rangeIndices } from './model';
 import { layoutNote, type RichLine } from './richText';
 import { getTheme } from './themes';
+import { branchProgress, dueLabel } from './tasks';
 
 export type Measure = (text: string, font: string) => number;
 
@@ -60,6 +61,8 @@ export interface NodeBox {
   imageH: number;
   /** The note, when it is shown inside the topic below the text. */
   noteBlock?: NoteBlock;
+  /** Task and tag chips under the text (progress, due date, person, tags). */
+  meta?: MetaRow;
   /** Set on summary topics: the topic whose children they sum up. */
   summaryOf?: string;
 }
@@ -97,6 +100,52 @@ export interface NoteBlock {
   lineHeight: number;
   /** Vertical space it takes at the bottom of the box, gaps included. */
   h: number;
+}
+
+/** One chip of a topic's task and tag row. */
+export interface MetaChip {
+  kind: 'progress' | 'due' | 'who' | 'tag';
+  label: string;
+  /** Left edge, from the row's start. */
+  x: number;
+  w: number;
+  /** The tag itself (kind 'tag'). */
+  tag?: string;
+  /** kind 'progress': share done, 0..1. */
+  ratio?: number;
+}
+
+export interface MetaRow {
+  chips: MetaChip[];
+  w: number;
+  /** Vertical space it takes under the text, gap included. */
+  h: number;
+}
+
+export const META_FONT = `600 10.5px 'Plus Jakarta Sans', system-ui, sans-serif`;
+export const META_CHIP_H = 17;
+const META_GAP = 5;
+const META_PAD = 6;
+/** Room for the small bar inside a progress chip. */
+export const META_BAR_W = 22;
+/** Room for the small calendar or person icon inside a chip. */
+export const META_ICON_W = 13;
+
+function metaRowFor(t: Topic, measure: Measure): MetaRow | undefined {
+  const chips: MetaChip[] = [];
+  let x = 0;
+  const add = (kind: MetaChip['kind'], label: string, extra = 0, more: Partial<MetaChip> = {}) => {
+    const w = Math.ceil(measure(label, META_FONT) + META_PAD * 2 + extra);
+    chips.push({ kind, label, x, w, ...more });
+    x += w + 4;
+  };
+  const p = branchProgress(t);
+  if (p) add('progress', `${p.done}/${p.total}`, META_BAR_W + 4, { ratio: p.done / p.total });
+  if (t.task && t.due) add('due', dueLabel(t.due), META_ICON_W);
+  if (t.task && t.assignee) add('who', t.assignee, META_ICON_W);
+  for (const tag of t.tags ?? []) add('tag', `#${tag}`, 0, { tag });
+  if (!chips.length) return undefined;
+  return { chips, w: x - 4, h: META_CHIP_H + META_GAP };
 }
 
 /** An arrow between two steps of a flow chart. */
@@ -268,7 +317,7 @@ function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, res
   const lines = (t.text || ' ').split('\n');
   const textW = Math.max(...lines.map((l) => measure(l || ' ', font)));
   const lineHeight = Math.round(m.fontSize * 1.35);
-  const icons = (t.markers?.length ?? 0) + (t.note ? 1 : 0) + (t.href ? 1 : 0);
+  const icons = (t.markers?.length ?? 0) + (t.note ? 1 : 0) + (t.href ? 1 : 0) + (t.task ? 1 : 0);
   const iconW = icons * (MARKER_SIZE + MARKER_GAP);
   const href = t.image && resources?.[t.image.res];
   let image: NodeBox['image'];
@@ -279,9 +328,10 @@ function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, res
   const imageH = image ? image.h + IMAGE_GAP : 0;
   const noteBlock = noteBlockFor(t, m.fontSize, m.padY, textW + iconW, measure, notebook);
   const noteW = noteBlock?.w ?? 0;
-  const w = Math.max(m.minW, Math.ceil(textW + iconW + lead + m.padX * 2), image ? image.w + m.padX * 2 : 0, Math.ceil(noteW + m.padX * 2));
-  const h = Math.max(lines.length * lineHeight, icons ? MARKER_SIZE : 0) + m.padY * 2 + imageH + (noteBlock?.h ?? 0);
-  return { w, h, lines, font, fontSize: m.fontSize, lineHeight, padX: m.padX, lead, shape: m.shape, image, imageH, noteBlock };
+  const meta = metaRowFor(t, measure);
+  const w = Math.max(m.minW, Math.ceil(textW + iconW + lead + m.padX * 2), image ? image.w + m.padX * 2 : 0, Math.ceil(noteW + m.padX * 2), meta ? meta.w + lead + m.padX * 2 : 0);
+  const h = Math.max(lines.length * lineHeight, icons ? MARKER_SIZE : 0) + m.padY * 2 + imageH + (meta?.h ?? 0) + (noteBlock?.h ?? 0);
+  return { w, h, lines, font, fontSize: m.fontSize, lineHeight, padX: m.padX, lead, shape: m.shape, image, imageH, noteBlock, meta };
 }
 
 const H_GAP = (depth: number) => (depth === 0 ? 64 : 40);

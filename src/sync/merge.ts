@@ -8,7 +8,7 @@
 import { mergeCanvas } from '../core/canvas';
 import { canvasFiles, type MindMap, type Relation, type Topic } from '../core/model';
 
-const TOPIC_FIELDS = ['text', 'image', 'pos', 'layout', 'note', 'markers', 'collapsed', 'style', 'linkLabel', 'href', 'boundaries', 'summaries', 'inside', 'innerLayout', 'innerKind'] as const;
+const TOPIC_FIELDS = ['text', 'image', 'pos', 'layout', 'note', 'markers', 'collapsed', 'style', 'linkLabel', 'href', 'boundaries', 'summaries', 'inside', 'innerLayout', 'innerKind', 'tags', 'task', 'due', 'assignee'] as const;
 const MAP_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor', 'notebook', 'canvasMode'] as const;
 const ROOT = '\u0000root';
 

@@ -4,6 +4,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { outlineRows } from '../core/outline';
 import { countTopics, type MindMap } from '../core/model';
+import { branchProgress, tagColor } from '../core/tasks';
 import { t } from '../i18n';
 import * as I from './Icons';
 
@@ -31,6 +32,8 @@ interface Props {
   onToggleCollapse(id: string): void;
   /** Right click on a row. */
   onContextMenu?(id: string, clientX: number, clientY: number): void;
+  /** A task's checkbox was clicked. */
+  onCheckTask?(id: string): void;
 }
 
 export function OutlineView(props: Props) {
@@ -74,6 +77,8 @@ export function OutlineView(props: Props) {
           const selected = tp.id === selectedId || !!props.selectedIds?.has(tp.id);
           const firstLine = tp.text.split('\n')[0] || ' ';
           const multi = tp.text.includes('\n');
+          const bp = branchProgress(tp);
+          const progress = bp ? { done: bp.done, all: bp.total } : null;
           return (
             <div
               key={tp.id}
@@ -115,10 +120,27 @@ export function OutlineView(props: Props) {
                 <span className="o-toggle" aria-hidden="true" />
               )}
               <span className="o-dot" style={{ background: props.colorOf(tp.id) }} aria-hidden="true" />
-              <span className="o-text">
+              {tp.task && (
+                <button
+                  className={`o-task ${tp.task === 'done' ? 'on' : ''}`}
+                  tabIndex={-1}
+                  role="checkbox"
+                  aria-checked={tp.task === 'done'}
+                  aria-label={firstLine}
+                  disabled={!props.onCheckTask}
+                  onClick={() => props.onCheckTask?.(tp.id)}
+                >
+                  {tp.task === 'done' && <I.Check size={11} />}
+                </button>
+              )}
+              <span className={`o-text ${tp.task === 'done' ? 'o-done' : ''}`}>
                 {firstLine}
                 {multi && <span className="o-more"> …</span>}
               </span>
+              {progress && <span className="o-badge o-prog" title={t('status.tasks', progress)}>{progress.done}/{progress.all}</span>}
+              {tp.tags?.map((tag) => (
+                <span key={tag} className="o-tag" style={{ color: tagColor(tag) }}>#{tag}</span>
+              ))}
               {tp.note && <span className="o-badge" title={t('outline.hasNote')}><I.NoteIcon size={13} /></span>}
               {tp.collapsed && hasKids && <span className="o-badge count">{countTopics(tp) - 1}</span>}
               {tp.id === editingId && (

@@ -77,6 +77,12 @@ interface Props {
   onContextMenu?(target: CanvasTarget, clientX: number, clientY: number): void;
   /** The link icon on a topic was clicked. */
   onOpenLink?(id: string): void;
+  /** A task's checkbox was clicked. */
+  onCheckTask?(id: string): void;
+  /** A tag chip was clicked (filters by that tag). */
+  onTagClick?(tag: string): void;
+  /** Topics faded by the tag / task filter. */
+  filterDim?: Set<string>;
   /** Topic whose note card is open on the canvas. */
   noteId?: string | null;
   onOpenNote?(id: string): void;
@@ -495,13 +501,17 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       return;
     }
     const additive = e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey);
-    if (topicId && additive && props.onSelectExtend && !el.closest('[data-link-glyph], [data-note-glyph]')) {
+    if (topicId && additive && props.onSelectExtend && !el.closest('[data-link-glyph], [data-note-glyph], [data-task-check]')) {
       props.onSelectExtend(topicId, e.ctrlKey || e.metaKey);
       return;
     }
     if (topicId && el.closest('[data-link-glyph]') && props.onOpenLink) {
       props.onSelect(topicId);
       props.onOpenLink(topicId);
+      return;
+    }
+    if (topicId && e.button === 0 && el.closest('[data-task-check]') && props.onCheckTask && !props.readOnly) {
+      props.onCheckTask(topicId);
       return;
     }
     const check = el.closest('[data-note-check]');
@@ -514,6 +524,12 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     if (topicId && noteHref && e.button === 0 && !additive && props.onOpenNoteLink) {
       props.onSelect(topicId);
       props.onOpenNoteLink(noteHref);
+      return;
+    }
+    const tagEl = el.closest('[data-tag]');
+    if (topicId && e.button === 0 && tagEl && props.onTagClick && !additive) {
+      props.onSelect(topicId);
+      props.onTagClick(tagEl.getAttribute('data-tag')!);
       return;
     }
     if (topicId && el.closest('[data-note-glyph]') && props.onOpenNote) {
@@ -698,7 +714,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
             selectedIds={editingId ? undefined : props.selectedIds}
             selectedRelId={props.selectedRelId ?? undefined}
             selectedBoundaryId={props.selectedBoundaryId ?? undefined}
-            dimIds={dragged ?? undefined}
+            dimIds={dragged ?? props.filterDim}
             viewport={viewport}
             simple={simple}
           />}
@@ -823,7 +839,7 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
   const lead = box.lead ?? 0;
   const w = Math.max(box.w, textW + box.padX * 2 + lead + 8) * view.k;
   // The edit box covers the text area only, below any picture.
-  const bodyH = box.h - box.imageH - (box.noteBlock?.h ?? 0);
+  const bodyH = box.h - box.imageH - (box.meta?.h ?? 0) - (box.noteBlock?.h ?? 0);
   const padY = (bodyH - box.lineHeight * box.lines.length) / 2;
   const h = Math.max(bodyH, lines.length * box.lineHeight + padY * 2) * view.k;
   const { fill, text } = nodeColors(box, theme);

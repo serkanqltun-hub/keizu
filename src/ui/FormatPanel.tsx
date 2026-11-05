@@ -25,8 +25,8 @@ interface Props {
   summary?: { owner: Topic; summary: Summary };
   onSummaryResize(end: 'start' | 'end', delta: 1 | -1): void;
   onSummaryDelete(): void;
-  tab: 'style' | 'map';
-  onTab(tab: 'style' | 'map'): void;
+  tab: 'style' | 'map' | 'tasks';
+  onTab(tab: 'style' | 'map' | 'tasks'): void;
   onStyle(patch: TopicStyle): void;
   onBranchLayout(layout: LayoutKind | undefined): void;
   onMarker(id: string): void;
@@ -38,6 +38,10 @@ interface Props {
   onMap(patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'notebook'>>): void;
   /** More topic settings, shown under the topic's own (inner map actions). */
   topicExtra?: React.ReactNode;
+  /** Shown above the topic's look settings (task fields and tags). */
+  topicTop?: React.ReactNode;
+  /** The "Tasks" tab. */
+  tasksPane?: React.ReactNode;
 }
 
 const SHAPES: { id: TopicShape; css: React.CSSProperties }[] = [
@@ -90,8 +94,11 @@ export function FormatPanel(props: Props) {
       <div role="tablist" className="tabs">
         <button role="tab" aria-selected={tab === 'style'} onClick={() => onTab('style')}>{t('panel.topic')}</button>
         <button role="tab" aria-selected={tab === 'map'} onClick={() => onTab('map')}>{t('panel.map')}</button>
+        {props.tasksPane && <button role="tab" aria-selected={tab === 'tasks'} onClick={() => onTab('tasks')}>{t('tasks.tab')}</button>}
       </div>
-      {tab === 'style' ? (
+      {tab === 'tasks' && props.tasksPane ? (
+        props.tasksPane
+      ) : tab === 'style' ? (
         relation ? (
           <RelationSection key={relation.id} relation={relation} onLabel={onRelationLabel} onDelete={onRelationDelete} />
         ) : boundary ? (
@@ -105,6 +112,7 @@ export function FormatPanel(props: Props) {
               <button className="btn" onClick={props.onSummaryDelete}>{t('panel.deleteSummary')}</button>
             </section>
           )}
+          {props.topicTop}
           <TopicSection
             key={topic.id}
             topic={topic}

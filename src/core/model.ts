@@ -56,6 +56,14 @@ export interface Topic {
    */
   href?: string;
   markers?: string[];
+  /** Free words for filtering, without "#" ("acil", "fikir"). */
+  tags?: string[];
+  /** Task mode: the topic has a checkbox. Progress of a branch is counted from these. */
+  task?: 'todo' | 'done';
+  /** Task due date, YYYY-MM-DD. */
+  due?: string;
+  /** Who the task is for. */
+  assignee?: string;
   collapsed?: boolean;
   style?: TopicStyle;
   /**
