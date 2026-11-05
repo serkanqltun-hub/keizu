@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { MARKERS } from '../core/markers';
-import type { BranchStyle, LayoutKind, MindMap, Relation, Topic, TopicShape, TopicStyle } from '../core/model';
+import { rangeIndices, type Boundary, type BranchStyle, type ChildRange, type LayoutKind, type MindMap, type Relation, type Summary, type Topic, type TopicShape, type TopicStyle } from '../core/model';
 import { FILL_SWATCHES, THEMES } from '../core/themes';
 import { t, type MessageKey } from '../i18n';
 import { MarkerGlyph } from './MapSvg';
@@ -14,6 +14,14 @@ interface Props {
   inheritedLayout: LayoutKind;
   onRelationLabel(label: string): void;
   onRelationDelete(): void;
+  /** The selected boundary and the topic whose children it holds. */
+  boundary?: { owner: Topic; boundary: Boundary };
+  onBoundary(patch: Partial<Pick<Boundary, 'label' | 'color'>>): void;
+  onBoundaryResize(end: 'start' | 'end', delta: 1 | -1): void;
+  /** Set when the selected topic is a summary. */
+  summary?: { owner: Topic; summary: Summary };
+  onSummaryResize(end: 'start' | 'end', delta: 1 | -1): void;
+  onSummaryDelete(): void;
   tab: 'style' | 'map';
   onTab(tab: 'style' | 'map'): void;
   onStyle(patch: TopicStyle): void;
@@ -70,7 +78,8 @@ function LayoutGlyph({ id, d }: { id: LayoutKind; d: string }) {
   );
 }
 
-export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete }: Props) {
+export function FormatPanel(props: Props) {
+  const { map, topic, relation, isRoot, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete, boundary, summary } = props;
   return (
     <aside className="panel" aria-label={t('panel.label')}>
       <div role="tablist" className="tabs">
@@ -80,7 +89,17 @@ export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab
       {tab === 'style' ? (
         relation ? (
           <RelationSection key={relation.id} relation={relation} onLabel={onRelationLabel} onDelete={onRelationDelete} />
+        ) : boundary ? (
+          <BoundarySection key={boundary.boundary.id} owner={boundary.owner} boundary={boundary.boundary} onChange={props.onBoundary} onResize={props.onBoundaryResize} onDelete={onRelationDelete} />
         ) : topic ? (
+          <>
+          {summary && (
+            <section>
+              <h3 className="lbl">{t('panel.summaryRange')}</h3>
+              <RangeControls owner={summary.owner} range={summary.summary} onResize={props.onSummaryResize} />
+              <button className="btn" onClick={props.onSummaryDelete}>{t('panel.deleteSummary')}</button>
+            </section>
+          )}
           <TopicSection
             key={topic.id}
             topic={topic}
@@ -94,6 +113,7 @@ export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab
             onHref={onHref}
             maps={maps.filter((m) => m.id !== map.id)}
           />
+          </>
         ) : (
           <p className="muted">{t('panel.pickTopic')}</p>
         )
@@ -361,6 +381,74 @@ function RelationSection({ relation, onLabel, onDelete }: { relation: Relation; 
         />
       </label>
       <button className="btn" onClick={onDelete}>{t('panel.deleteRelation')}</button>
+    </section>
+  );
+}
+
+/** Saturated colours for boundary outlines. */
+const BOUNDARY_COLORS = ['#E8590C', '#1C7ED6', '#2B8A3E', '#9C36B5', '#F08C00', '#C2255C', '#5C6773'];
+
+/** Grow or shrink a run of siblings, one topic at either end. */
+function RangeControls({ owner, range, onResize }: { owner: Topic; range: ChildRange; onResize(end: 'start' | 'end', delta: 1 | -1): void }) {
+  const ix = rangeIndices(owner, range);
+  if (!ix) return null;
+  const [lo, hi] = ix;
+  const last = owner.children.length - 1;
+  return (
+    <div className="range-ctl">
+      <p className="muted small">{t('panel.range', { n: hi - lo + 1 })}</p>
+      <div className="range-btns">
+        <button className="btn sm" disabled={lo === 0} onClick={() => onResize('start', 1)}>↑ {t('panel.range.growStart')}</button>
+        <button className="btn sm" disabled={hi === last} onClick={() => onResize('end', 1)}>↓ {t('panel.range.growEnd')}</button>
+        <button className="btn sm" disabled={lo === hi} onClick={() => onResize('start', -1)}>{t('panel.range.shrinkStart')}</button>
+        <button className="btn sm" disabled={lo === hi} onClick={() => onResize('end', -1)}>{t('panel.range.shrinkEnd')}</button>
+      </div>
+    </div>
+  );
+}
+
+function BoundarySection({
+  owner,
+  boundary,
+  onChange,
+  onResize,
+  onDelete,
+}: {
+  owner: Topic;
+  boundary: Boundary;
+  onChange(p: Partial<Pick<Boundary, 'label' | 'color'>>): void;
+  onResize(end: 'start' | 'end', delta: 1 | -1): void;
+  onDelete(): void;
+}) {
+  const [label, setLabel] = useState(boundary.label ?? '');
+  useEffect(() => setLabel(boundary.label ?? ''), [boundary.label]);
+  return (
+    <section>
+      <h3 className="lbl">{t('panel.boundary')}</h3>
+      <label className="field">
+        <span className="muted">{t('panel.boundaryLabel')}</span>
+        <input
+          className="text-input"
+          id="boundary-label"
+          value={label}
+          placeholder={t('panel.boundaryLabelPlaceholder')}
+          onChange={(e) => setLabel(e.target.value)}
+          onBlur={() => label.trim() !== (boundary.label ?? '') && onChange({ label: label.trim() || undefined })}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+          }}
+        />
+      </label>
+      <h3 className="lbl">{t('panel.boundaryColor')}</h3>
+      <div className="swatches">
+        <button className={`sw auto ${!boundary.color ? 'on' : ''}`} aria-label={t('panel.autoColor')} title={t('panel.autoColor')} onClick={() => onChange({ color: undefined })}>A</button>
+        {BOUNDARY_COLORS.map((c) => (
+          <button key={c} className={`sw ${boundary.color === c ? 'on' : ''}`} aria-label={c} style={{ background: c }} onClick={() => onChange({ color: c })} />
+        ))}
+      </div>
+      <RangeControls owner={owner} range={boundary} onResize={onResize} />
+      <button className="btn" onClick={onDelete}>{t('panel.deleteBoundary')}</button>
     </section>
   );
 }

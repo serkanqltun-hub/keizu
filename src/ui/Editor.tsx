@@ -1,10 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { initHistory, push, redo, replace, undo, type History } from '../core/history';
-import { layoutMap, type MapLayout } from '../core/layout';
+import { layoutMap, type FocusOptions, type MapLayout } from '../core/layout';
 import { outlineRows } from '../core/outline';
 import {
   addChild,
+  addBoundary,
+  addSummary,
+  findBoundary,
   findParent,
+  isDescendant,
+  isSummaryTopic,
+  removeBoundary,
+  removeSummary,
+  resizeBoundary,
+  resizeSummary,
+  summaryOwner,
+  updateBoundary,
   indentTopic,
   moveAmongSiblings,
   outdentTopic,
@@ -171,17 +182,62 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const [linkKind, setLinkKind] = useState<'relation' | 'flow'>('relation');
   const [selectedRelId, setSelectedRelId] = useState<string | null>(null);
   const selectedRel = map.relations.find((r) => r.id === selectedRelId);
+  const [selectedBoundaryId, setSelectedBoundaryId] = useState<string | null>(null);
+  const selectedBoundary = selectedBoundaryId ? findBoundary(map, selectedBoundaryId) : undefined;
+  // Focus mode: only this branch is on the map.
+  const [focus, setFocus] = useState<FocusOptions | null>(null);
   const theme = getTheme(map.theme);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  const layout = useMemo(() => layoutMap(map, canvasMeasure), [map, fontsReady]);
+  const layout = useMemo(() => layoutMap(map, canvasMeasure, focus ?? undefined), [map, fontsReady, focus]);
+  // The whole map's layout: the same one outside focus mode.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const fullLayout = useMemo(() => (focus ? layoutMap(map, canvasMeasure) : layout), [map, fontsReady, focus, layout]);
   const selected = selectedId ? findTopic(map, selectedId) : undefined;
   /** The selected topic is a step of a flow chart. */
   const inFlow = !!selectedId && layout.byId.get(selectedId)?.layout === 'flow';
+  const focused = focus && layout.focusId ? findTopic(map, focus.id) : undefined;
+  /** The topic the map is drawn around: the focused one, or the main topic. */
+  const viewRootId = focused?.id ?? mainId;
 
   const selectTopic = useCallback((id: string | null) => {
     setSelectedId(id);
-    if (id) setSelectedRelId(null);
+    if (id) {
+      setSelectedRelId(null);
+      setSelectedBoundaryId(null);
+    }
   }, []);
+
+  // A focused topic that is gone (deleted, undone) ends focus mode.
+  useEffect(() => {
+    if (focus && !findTopic(map, focus.id)) setFocus(null);
+  }, [map, focus]);
+  // Only the canvas shows focus mode.
+  useEffect(() => {
+    if (view !== 'map') setFocus(null);
+  }, [view]);
+
+  /** Shows only the branch of `id`, drawn where it stands now so the move is smooth. */
+  const enterFocus = (id: string) => {
+    if (id === mainId || isSummaryTopic(map, id) || !findTopic(map, id)) return setFocus(null);
+    // Going up to an ancestor: its place on the full map.
+    const shown = layout.byId.get(id);
+    const box = shown ?? fullLayout.byId.get(id);
+    const color = box && box.depth > 0 ? box.color : focus?.color;
+    setFocus({ id, anchor: box ? { x: box.x, y: box.y } : undefined, color });
+    if (!selectedId || !(selectedId === id || isDescendant(map, id, selectedId))) selectTopic(id);
+  };
+  const exitFocus = () => setFocus(null);
+  /** Leaves focus mode if `id` is outside the focused branch. */
+  const keepInFocus = (id: string) => {
+    if (focus && id !== focus.id && !isDescendant(map, focus.id, id)) setFocus(null);
+  };
+  /** Ancestors of the focused topic, then the topic: the focus bar. */
+  const focusPath = useMemo(() => {
+    if (!focused) return [];
+    const path: { id: string; text: string }[] = [];
+    for (let p: { id: string; text: string } | undefined = focused; p; p = findParent(map, p.id)) path.unshift({ id: p.id, text: p.text });
+    return path;
+  }, [map, focused]);
 
   // Live collaboration (Keizu Server): maps that arrive from the session
   // replace the editor's map without becoming an undo step.
@@ -346,8 +402,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
 
   // If the selected topic disappears (undo, collapse), fall back to the root.
   useEffect(() => {
-    if (selectedId && !layout.byId.has(selectedId)) setSelectedId(mainId);
-  }, [layout, selectedId, mainId]);
+    if (selectedId && !layout.byId.has(selectedId)) setSelectedId(viewRootId);
+  }, [layout, selectedId, viewRootId]);
+  useEffect(() => {
+    if (selectedBoundaryId && !selectedBoundary) setSelectedBoundaryId(null);
+  }, [selectedBoundaryId, selectedBoundary]);
 
   const startEdit = (id: string, seed: string | null = null) => {
     if (readOnly) return;
@@ -360,6 +419,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
 
   /** Selects a topic anywhere in the map, opening collapsed branches on the way. */
   const goTo = (id: string) => {
+    keepInFocus(id);
     const shown = revealTopic(map, id);
     if (shown !== map) commit(shown);
     selectTopic(id);
@@ -386,7 +446,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     }
     const i = rows.findIndex((r) => r.topic.id === id);
     const row = rows[i];
-    if (!row) return selectTopic(mainId);
+    if (!row) return selectTopic(viewRootId);
     if (dir === 'up' && i > 0) selectTopic(rows[i - 1].topic.id);
     if (dir === 'down' && i < rows.length - 1) selectTopic(rows[i + 1].topic.id);
     const tp = row.topic;
@@ -409,6 +469,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     },
     addSibling(before = false) {
       if (!selectedId) return;
+      // In focus mode the focused topic acts as the centre: it grows children.
+      if (selectedId === viewRootId && focused) return actions.addChild();
+      if (isSummaryTopic(map, selectedId)) return;
       const r = addSibling(map, selectedId, selectedId === mainId ? t('topic.main') : t('topic.default'), before);
       commit(r.map, r.id);
       startEdit(r.id);
@@ -419,7 +482,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         setSelectedRelId(null);
         return;
       }
-      if (!selectedId || selectedId === mainId) return;
+      if (selectedBoundaryId) {
+        const owner = selectedBoundary?.boundary.from;
+        commit(removeBoundary(map, selectedBoundaryId), owner ?? null);
+        setSelectedBoundaryId(null);
+        return;
+      }
+      if (!selectedId || selectedId === viewRootId) return;
       const r = removeTopic(map, selectedId);
       commit(r.map, r.nextId);
     },
@@ -440,7 +509,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     copy(cut = false) {
       if (!selected) return;
       clipboard.current = selected;
-      if (cut && selectedId !== mainId) actions.remove();
+      if (cut && selectedId !== viewRootId) actions.remove();
       setToast(cut ? t('toast.cut') : t('toast.copied'));
     },
     paste() {
@@ -468,7 +537,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (r.id) commit(r.map);
       else setToast(t('toast.mergeExists'));
     },
-    floating(pos = { x: 0, y: (layout.bounds.maxY ?? 0) + 120 }) {
+    floating(pos?: { x: number; y: number }) {
+      // Floating topics live outside any branch: leave focus mode to show them.
+      if (focused) setFocus(null);
+      pos ??= { x: 0, y: fullLayout.bounds.maxY + 120 };
       const r = addFloating(map, pos, t('topic.floating'));
       commit(r.map, r.id);
       startEdit(r.id);
@@ -491,12 +563,38 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (!(await store.get(ml.mapId))) return setToast(t('toast.linkMissing'));
       onOpenMap(ml.mapId, ml.topicId);
     },
+    focus() {
+      if (view !== 'map') switchView('map');
+      if (selectedId && selectedId !== viewRootId && selectedId !== mainId) enterFocus(selectedId);
+      else exitFocus();
+    },
+    boundary() {
+      if (!selectedId) return;
+      const r = addBoundary(map, [selectedId]);
+      if (!r.id) return setToast(t('toast.noRun'));
+      commit(r.map, null);
+      setSelectedBoundaryId(r.id);
+      setSelectedRelId(null);
+      setPanelOpen(true);
+      setHistoryOpen(false);
+      setPanelTab('style');
+    },
+    summary() {
+      if (!selectedId) return;
+      const r = addSummary(map, [selectedId], t('topic.summary'));
+      if (!r.id) return setToast(t('toast.noRun'));
+      commit(r.map, r.id);
+      startEdit(r.id);
+    },
     move(id: string | null, fn: (m: MindMap, id: string) => MindMap) {
       if (!id) return;
       const next = fn(map, id);
       if (next !== map) commit(next, id);
     },
   };
+
+  // Boundaries and summaries group branches: any topic that has a parent.
+  const canGroup = !!selectedId && !!findParent(map, selectedId);
 
   // ---------- right-click menu ----------
 
@@ -621,6 +719,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       hasKids && !isMain && item('collapse', actions.collapse, { label: tp.collapsed ? t('ctx.expand') : t('ctx.collapse'), icon: <I.Collapse size={16} /> }),
       item('relation', actions.relation, { icon: <I.RelationIcon size={16} /> }),
       layout.byId.get(id)?.layout === 'flow' && item('merge', actions.merge, { icon: <I.MergeIcon size={16} /> }),
+      canGroup && item('boundary', actions.boundary, { icon: <I.BoundaryIcon size={16} /> }),
+      canGroup && item('summary', actions.summary, { icon: <I.SummaryIcon size={16} /> }),
+      view === 'map' && commands.focus.enabled !== false && { type: 'item', id: 'focusMode', label: focused?.id === id ? t('focus.exit') : cmdLabel('focus'), keys: keyOf('focus'), icon: <I.FocusIcon size={16} />, run: actions.focus },
       view === 'map' && { type: 'item', id: 'focus', label: t('ctx.focus'), keys: keyOf('centerSelected'), icon: <I.Target size={16} />, run: () => canvas.current?.centerOn(id) },
       sep,
       !isMain && item('cut', () => actions.copy(true), { icon: <I.Cut size={16} /> }),
@@ -708,13 +809,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     addSibling: { run: () => actions.addSibling(), enabled: !!selectedId },
     addSiblingBefore: { run: () => actions.addSibling(true), enabled: !!selectedId },
     edit: { run: () => selectedId && startEdit(selectedId), enabled: !!selectedId },
-    remove: { run: actions.remove, enabled: !!selectedRelId || (!!selectedId && selectedId !== mainId) },
+    remove: { run: actions.remove, enabled: !!selectedRelId || !!selectedBoundaryId || (!!selectedId && selectedId !== viewRootId) },
     undo: { run: actions.undo, enabled: session ? session.canUndo() : hist.past.length > 0 },
     redo: { run: actions.redo, enabled: session ? session.canRedo() : hist.future.length > 0 },
     copy: { run: () => actions.copy(), enabled: !!selected },
-    cut: { run: () => actions.copy(true), enabled: !!selected && selectedId !== mainId },
+    cut: { run: () => actions.copy(true), enabled: !!selected && selectedId !== viewRootId },
     paste: { run: actions.paste, enabled: !!selectedId && !!clipboard.current },
-    collapse: { run: actions.collapse, enabled: !!selected?.children.length && selectedId !== mainId },
+    collapse: { run: actions.collapse, enabled: !!selected?.children.length && selectedId !== viewRootId },
     moveUp: { run: () => actions.move(selectedId, (m, id) => moveAmongSiblings(m, id, -1)), enabled: !!selectedId },
     moveDown: { run: () => actions.move(selectedId, (m, id) => moveAmongSiblings(m, id, 1)), enabled: !!selectedId },
     indent: { run: () => actions.move(selectedId, indentTopic), enabled: !!selectedId },
@@ -740,6 +841,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     present: { run: () => setPresenting(true) },
     openLink: { run: () => actions.openLink(), enabled: !!selected?.href },
     share: { run: () => setShareOpen(true), enabled: !shared && sync.canShare() },
+    focus: { run: actions.focus, enabled: !!focused || (!!selectedId && selectedId !== mainId && !!selected && !isSummaryTopic(map, selectedId)) },
+    boundary: { run: actions.boundary, enabled: !!selectedId && canGroup },
+    summary: { run: actions.summary, enabled: !!selectedId && canGroup },
   };
 
   // Keyboard shortcuts (inactive while typing in a field or a dialog is open).
@@ -755,7 +859,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (id) {
         e.preventDefault();
         // Arrow keys and editing keys act on the selected relation, if any.
-        if (selectedRelId && ['navLeft', 'navRight', 'navUp', 'navDown', 'edit'].includes(id)) return;
+        if ((selectedRelId || selectedBoundaryId) && ['navLeft', 'navRight', 'navUp', 'navDown', 'edit'].includes(id)) return;
         const c = commands[id];
         if (c.enabled !== false) c.run();
         return;
@@ -763,11 +867,12 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (e.key === 'Escape') {
         e.preventDefault();
         if (relationFrom) setRelationFrom(null);
-        else selectTopic(null), setSelectedRelId(null);
+        else if (focused) exitFocus();
+        else selectTopic(null), setSelectedRelId(null), setSelectedBoundaryId(null);
         return;
       }
       // Typing a character starts editing with that character.
-      if (e.key.length === 1 && !e.altKey && !e.ctrlKey && !e.metaKey && selectedId && !selectedRelId) {
+      if (e.key.length === 1 && !e.altKey && !e.ctrlKey && !e.metaKey && selectedId && !selectedRelId && !selectedBoundaryId) {
         e.preventDefault();
         startEdit(selectedId, e.key);
       }
@@ -787,9 +892,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const runExport = async (kind: 'png' | 'svg' | 'pdf' | 'md' | 'opml' | 'keizu' | 'json') => {
     setExportOpen(false);
     try {
-      if (kind === 'png') await exportPng(map, layout, theme);
-      if (kind === 'svg') await exportSvg(map, layout, theme);
-      if (kind === 'pdf') await exportPdf(map, layout, theme);
+      if (kind === 'png') await exportPng(map, fullLayout, theme);
+      if (kind === 'svg') await exportSvg(map, fullLayout, theme);
+      if (kind === 'pdf') await exportPdf(map, fullLayout, theme);
       if (kind === 'md') await exportMarkdown(map);
       if (kind === 'opml') await exportOpml(map);
       if (kind === 'keizu') await exportKeizu(map);
@@ -819,11 +924,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const parentBox = selectedId ? layout.byId.get(layout.byId.get(selectedId)?.parentId ?? '') : undefined;
   const inheritedLayout = parentBox?.layout ?? map.layout;
   const colorOf = (id: string) => {
-    const b = layout.byId.get(id);
+    const b = fullLayout.byId.get(id);
     if (b) return b.color;
     // Hidden in a collapsed branch on the map: use the nearest shown ancestor.
     for (let p = findParent(map, id); p; p = findParent(map, p.id)) {
-      const pb = layout.byId.get(p.id);
+      const pb = fullLayout.byId.get(p.id);
       if (pb) return pb.color;
     }
     return theme.mono;
@@ -866,8 +971,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               editSeed={null}
               colorOf={colorOf}
               onSelect={(id) => {
+                keepInFocus(id);
                 selectTopic(id);
-                canvas.current?.centerOn(id);
+                setTimeout(() => canvas.current?.centerOn(id), 0);
               }}
               onStartEdit={(id) => {
                 selectTopic(id);
@@ -924,6 +1030,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           {inFlow && (
             <button className={`tb ${relationFrom && linkKind === 'flow' ? 'on' : ''}`} title={tip('merge', t('tb.mergeTip'))} onClick={actions.merge}><I.MergeIcon />{t('tb.merge')}</button>
           )}
+          <button className="tb" title={tip('boundary', t('tb.boundaryTip'))} disabled={!commands.boundary.enabled} onClick={actions.boundary}><I.BoundaryIcon />{t('tb.boundary')}</button>
+          <button className="tb" title={tip('summary', t('tb.summaryTip'))} disabled={!commands.summary.enabled} onClick={actions.summary}><I.SummaryIcon />{t('tb.summary')}</button>
           <button className="tb" title={t('tb.floatingTip')} onClick={() => actions.floating()}><I.FloatingIcon />{t('tb.floating')}</button>
           <button className="tb" title={t('tb.markerTip')} disabled={!selectedId} onClick={() => { setPanelOpen(true); setHistoryOpen(false); setPanelTab('style'); }}><I.MarkerIcon />{t('tb.marker')}</button>
           <button className="tb" title={t('tb.noteTip')} disabled={!selectedId} onClick={actions.note}><I.NoteIcon />{t('tb.note')}</button>
@@ -943,8 +1051,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               e.target.value = '';
             }}
           />
-          <button className="tb" title={tip('collapse')} disabled={!selected?.children.length || selectedId === mainId} onClick={actions.collapse}><I.Collapse />{t('tb.collapse')}</button>
-          <button className="tb" title={tip('remove')} disabled={!selectedRelId && (!selectedId || selectedId === mainId)} onClick={actions.remove}><I.Trash />{t('tb.delete')}</button>
+          <button className="tb" title={tip('collapse')} disabled={!commands.collapse.enabled} onClick={actions.collapse}><I.Collapse />{t('tb.collapse')}</button>
+          <button className={`tb ${focused ? 'on' : ''}`} aria-pressed={!!focused} title={focused ? `${t('focus.exit')} (Esc)` : tip('focus', t('tb.focusTip'))} disabled={!commands.focus.enabled} onClick={actions.focus}><I.FocusIcon />{t('tb.focus')}</button>
+          <button className="tb" title={tip('remove')} disabled={!commands.remove.enabled} onClick={actions.remove}><I.Trash />{t('tb.delete')}</button>
           <span className="tb-sep" />
           <div className="seg-tabs layout-switch" role="group" aria-label={t('layout.switch')}>
             {(['mindmap', 'logic', 'org'] as const).map((k) => (
@@ -1037,9 +1146,19 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               focusId={startId}
               onSelect={selectTopic}
               selectedRelId={selectedRelId}
+              selectedBoundaryId={selectedBoundaryId}
+              scopeId={focused?.id ?? null}
               relationFrom={relationFrom}
               onSelectRelation={(id) => {
                 setSelectedRelId(id);
+                setSelectedBoundaryId(null);
+                setSelectedId(null);
+                setPanelOpen(true);
+                setPanelTab('style');
+              }}
+              onSelectBoundary={(id) => {
+                setSelectedBoundaryId(id);
+                setSelectedRelId(null);
                 setSelectedId(null);
                 setPanelOpen(true);
                 setPanelTab('style');
@@ -1061,8 +1180,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
                 setRelationFrom(null);
                 setToast(null);
               }}
-              onFloat={(id, pos) => commit(floatTopic(map, id, pos), id)}
-              onCreateFloating={(pos) => actions.floating(pos)}
+              onFloat={(id, pos) => !focused && commit(floatTopic(map, id, pos), id)}
+              onCreateFloating={(pos) => !focused && actions.floating(pos)}
               onStartEdit={(id) => startEdit(id)}
               onCommitEdit={commitEdit}
               onCancelEdit={cancelEdit}
@@ -1093,6 +1212,26 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onContextMenu={(id, x, y) => openMenu({ kind: 'topic', id }, x, y)}
             />
           )}
+          {view === 'map' && focused && (
+            <nav className="focus-bar" aria-label={t('focus.label')}>
+              <I.FocusIcon size={15} />
+              <ol>
+                {focusPath.map((p, i) => (
+                  <li key={p.id}>
+                    {i < focusPath.length - 1 ? (
+                      <button onClick={() => (i === 0 && p.id === mainId ? exitFocus() : enterFocus(p.id))}>{p.text.split('\n')[0] || '…'}</button>
+                    ) : (
+                      <span aria-current="location">{p.text.split('\n')[0] || '…'}</span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+              <button className="focus-exit" title={t('focus.hint')} onClick={exitFocus}>
+                {t('focus.exit')}
+                <kbd>Esc</kbd>
+              </button>
+            </nav>
+          )}
           {view === 'map' && (
             <div className="zoom">
               <button className="ib" aria-label={cmdLabel('zoomOut')} title={tip('zoomOut')} onClick={() => canvas.current?.zoomBy(1 / 1.2)}><I.Minus size={16} /></button>
@@ -1114,6 +1253,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         <span>{t('status.relations', { n: map.relations.length })}</span>
         {live.peers.length > 0 && <span>{t('live.peers', { n: live.peers.length })}</span>}
         <span>{layoutName(map.layout)}</span>
+        {focused && <span>{t('status.focus', { name: focused.text.split('\n')[0] })}</span>}
         <button className="sb-lang" title={t('status.lang')} onClick={() => commands.language.run()}>{getLang().toUpperCase()}</button>
       </footer>
       </div>
@@ -1137,6 +1277,12 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
             map={map}
             topic={selected}
             relation={selectedRel}
+            boundary={selectedBoundary}
+            onBoundary={(p) => selectedBoundaryId && commit(updateBoundary(map, selectedBoundaryId, p))}
+            onBoundaryResize={(end, delta) => selectedBoundaryId && commit(resizeBoundary(map, selectedBoundaryId, end, delta))}
+            summary={selectedId ? summaryOwner(map, selectedId) : undefined}
+            onSummaryResize={(end, delta) => selectedId && commit(resizeSummary(map, selectedId, end, delta))}
+            onSummaryDelete={() => selectedId && commit(removeSummary(map, selectedId), summaryOwner(map, selectedId)?.summary.to ?? null)}
             onRelationLabel={(label) => selectedRelId && commit(updateRelation(map, selectedRelId, { label: label || undefined }))}
             onRelationDelete={() => actions.remove()}
             isRoot={selectedId === mainId}

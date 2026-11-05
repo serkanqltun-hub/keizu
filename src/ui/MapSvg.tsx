@@ -1,7 +1,7 @@
 // Pure rendering of a laid-out map. Used both by the live canvas and by the
 // SVG/PNG exporters, so what you export is exactly what you see.
 
-import { NOTE_GAP, edgeShape, flowEdgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
+import { BOUNDARY_LABEL_H, BOUNDARY_PAD, BRACKET_GAP, BRACKET_W, NOTE_GAP, edgeShape, flowEdgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
 import { FLAG_COLORS, MARKER_GAP, MARKER_SIZE, PRIORITY_COLORS } from '../core/markers';
 import type { MindMap } from '../core/model';
 import { deepen, tint, type Theme } from '../core/themes';
@@ -334,12 +334,119 @@ function FlowArrows({ map, layout, theme, selectedRelId, dimIds, fade }: { map: 
   );
 }
 
+type Box = { minX: number; minY: number; maxX: number; maxY: number };
+
+function unionOf(ids: string[], layout: MapLayout, extra: Box[]): Box | undefined {
+  let r: Box | undefined;
+  const add = (minX: number, minY: number, maxX: number, maxY: number) => {
+    if (!r) r = { minX, minY, maxX, maxY };
+    else r = { minX: Math.min(r.minX, minX), minY: Math.min(r.minY, minY), maxX: Math.max(r.maxX, maxX), maxY: Math.max(r.maxY, maxY) };
+  };
+  for (const id of ids) {
+    const b = layout.byId.get(id);
+    if (b) add(b.x - b.w / 2, b.y - b.h / 2, b.x + b.w / 2, b.y + b.h / 2);
+  }
+  for (const x of extra) add(x.minX, x.minY, x.maxX, x.maxY);
+  return r;
+}
+
+/**
+ * Where each boundary's outline goes, from where its topics are drawn right
+ * now (so outlines follow topics while they move). Inner boundaries first:
+ * an outer one wraps the inner outlines too.
+ */
+export function boundaryRects(layout: MapLayout): Map<string, Box> {
+  const out = new Map<string, Box>();
+  const sorted = [...layout.boundaries].sort((a, b) => a.members.length - b.members.length);
+  const done: { set: Set<string>; first: string; box: Box }[] = [];
+  for (const bd of sorted) {
+    const set = new Set(bd.members);
+    const inner = done.filter((d) => d.set.size <= set.size && set.has(d.first) && d.box).map((d) => d.box);
+    const u = unionOf(bd.members, layout, inner);
+    if (!u) continue;
+    const box = { minX: u.minX - BOUNDARY_PAD, minY: u.minY - BOUNDARY_PAD - (bd.label ? BOUNDARY_LABEL_H : 0), maxX: u.maxX + BOUNDARY_PAD, maxY: u.maxY + BOUNDARY_PAD };
+    out.set(bd.id, box);
+    done.push({ set, first: bd.members[0], box });
+  }
+  return out;
+}
+
+/** A curly bracket along one side of a span, its tip pointing away. */
+export function bracePath(orient: 'h' | 'v', dir: 1 | -1, base: number, from: number, to: number): string {
+  const w = BRACKET_W * dir;
+  const q = Math.min(BRACKET_W / 2, Math.abs(to - from) / 4);
+  const half = w / 2;
+  const m = (from + to) / 2;
+  if (orient === 'h') {
+    const P = (x: number, y: number) => `${base + x} ${y}`;
+    return `M${P(0, from)}Q${P(half, from)} ${P(half, from + q)}L${P(half, m - q)}Q${P(half, m)} ${P(w, m)}Q${P(half, m)} ${P(half, m + q)}L${P(half, to - q)}Q${P(half, to)} ${P(0, to)}`;
+  }
+  const P = (y: number, x: number) => `${x} ${base + y}`;
+  return `M${P(0, from)}Q${P(half, from)} ${P(half, from + q)}L${P(half, m - q)}Q${P(half, m)} ${P(w, m)}Q${P(half, m)} ${P(half, m + q)}L${P(half, to - q)}Q${P(half, to)} ${P(0, to)}`;
+}
+
+function Boundaries({ layout, theme, selectedId }: { layout: MapLayout; theme: Theme; selectedId?: string }) {
+  if (!layout.boundaries.length) return null;
+  const rects = boundaryRects(layout);
+  return (
+    <g>
+      {layout.boundaries.map((bd) => {
+        const r = rects.get(bd.id);
+        if (!r) return null;
+        const on = bd.id === selectedId;
+        const stroke = on ? SELECT_COLOR : bd.color;
+        const w = r.maxX - r.minX, h = r.maxY - r.minY;
+        const labelW = bd.label ? Math.min(w - 16, bd.label.length * 6.6 + 18) : 0;
+        return (
+          <g key={bd.id} data-boundary-id={bd.id}>
+            <rect x={r.minX} y={r.minY} width={w} height={h} rx={14} fill={bd.color} fillOpacity={theme.dark ? 0.12 : 0.07} stroke="none" style={{ pointerEvents: 'none' }} />
+            {/* Wide invisible outline: the part of a boundary that picks it. */}
+            <rect x={r.minX} y={r.minY} width={w} height={h} rx={14} fill="none" stroke="transparent" strokeWidth={12} style={{ cursor: 'pointer' }} />
+            <rect x={r.minX} y={r.minY} width={w} height={h} rx={14} fill="none" stroke={stroke} strokeWidth={on ? 2 : 1.4} strokeDasharray={on ? undefined : '6 4'} style={{ pointerEvents: 'none' }} />
+            {bd.label && (
+              <g style={{ cursor: 'pointer' }}>
+                <rect x={r.minX + 10} y={r.minY + 6} width={labelW} height={18} rx={9} fill={stroke} />
+                <text x={r.minX + 10 + labelW / 2} y={r.minY + 19} textAnchor="middle" fontSize={11} fontWeight={600} fill={isDark(stroke) || on ? '#FFFFFF' : '#14181E'} fontFamily={FONT}>
+                  {bd.label}
+                </text>
+              </g>
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+function Brackets({ layout }: { layout: MapLayout }) {
+  if (!layout.brackets.length) return null;
+  const rects = layout.boundaries.length ? boundaryRects(layout) : undefined;
+  return (
+    <g fill="none" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
+      {layout.brackets.map((br) => {
+        const s = layout.byId.get(br.id);
+        if (!s) return null;
+        const set = new Set(br.members);
+        const inner = rects ? layout.boundaries.filter((bd) => set.has(bd.members[0])).map((bd) => rects.get(bd.id)!).filter(Boolean) : [];
+        const u = unionOf(br.members, layout, inner);
+        if (!u) return null;
+        const d =
+          br.orient === 'h'
+            ? bracePath('h', br.dir, br.dir > 0 ? s.x - s.w / 2 - BRACKET_GAP - BRACKET_W : s.x + s.w / 2 + BRACKET_GAP + BRACKET_W, u.minY, u.maxY)
+            : bracePath('v', 1, s.y - s.h / 2 - BRACKET_GAP - BRACKET_W, u.minX, u.maxX);
+        return <path key={br.id} d={d} stroke={s.color} strokeWidth={1.6} data-bracket-id={br.id} />;
+      })}
+    </g>
+  );
+}
+
 interface MapSvgProps {
   map: MindMap;
   layout: MapLayout;
   theme: Theme;
   selectedId?: string;
   selectedRelId?: string;
+  selectedBoundaryId?: string;
   dimIds?: Set<string>;
   /** Draw only what touches this map-space rectangle. */
   viewport?: Rect;
@@ -349,11 +456,13 @@ interface MapSvgProps {
   fade?: Map<string, number>;
 }
 
-export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, viewport, simple, fade }: MapSvgProps) {
+export function MapSvg({ map, layout, theme, selectedId, selectedRelId, selectedBoundaryId, dimIds, viewport, simple, fade }: MapSvgProps) {
   const vis = visibleIn(layout, viewport);
   if (simple) return <SimpleMap map={map} layout={layout} theme={theme} nodes={vis.nodes} edges={vis.edges} selectedId={selectedId} />;
   return (
     <g>
+      <Boundaries layout={layout} theme={theme} selectedId={selectedBoundaryId} />
+      <Brackets layout={layout} />
       <g fill="none" strokeLinecap="round">
         {vis.edges.map((c) => {
           if (c.noEdge || c.flow === 'flow') return null;
