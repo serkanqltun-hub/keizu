@@ -88,6 +88,11 @@ pub fn run() {
                 let _ = w.set_focus();
             }
         }));
+        // Updates come from GitHub Releases (see tauri.conf.json → plugins.updater);
+        // the process plugin restarts the app once an update is installed.
+        builder = builder
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
     }
     builder
         .plugin(tauri_plugin_deep_link::init())

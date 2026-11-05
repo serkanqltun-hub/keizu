@@ -10,6 +10,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './ui/App';
 import { PublicView, viewToken } from './ui/PublicView';
+import { UpdatePrompt } from './ui/updates';
 
 // No browser / webview context menu (Back, Reload, Inspect…): Keizu shows
 // its own on the map. Text fields keep the native one for copy, paste and
@@ -24,5 +25,8 @@ document.addEventListener('contextmenu', (e) => {
 const token = viewToken();
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>{token ? <PublicView token={token} /> : <App />}</StrictMode>,
+  <StrictMode>
+    {token ? <PublicView token={token} /> : <App />}
+    <UpdatePrompt />
+  </StrictMode>,
 );
