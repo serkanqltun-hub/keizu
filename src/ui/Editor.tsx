@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { initHistory, push, redo, replace, undo, type History } from '../core/history';
 import { layoutMap, type FocusOptions, type MapLayout } from '../core/layout';
 import { outlineRows } from '../core/outline';
@@ -49,6 +49,22 @@ import {
 import { applyStyle, copyableStyle, documentOrder, floatTopics, moveTopics, pasteTopics, removeTopics, setCollapsed, setLayouts, setMarker, topLevel, updateStyles } from '../core/bulk';
 import { parsePastedText, topicsToText } from '../core/smartPaste';
 import { FILL_SWATCHES, getTheme } from '../core/themes';
+import {
+  addInner,
+  branchToInner,
+  hasInner,
+  innerPathTo,
+  innerToBranch,
+  insertMapAsTopic,
+  validPath,
+  viewOf,
+  writeBack,
+  type InnerPath,
+} from '../core/inner';
+import { importFile } from '../core/importFile';
+import { pickFiles } from './platform';
+import { nodeColors } from './MapSvg';
+import { ghostOf, playEnter, playExit } from './innerMotion';
 import { SNAPSHOT_EVERY_MS } from '../core/versions';
 import type { FileLink, LibraryStore } from '../sync/types';
 import { exportKeizu, exportMarkdown, exportOpml, exportPdf, exportPlainJson, exportPng, exportSvg, safeFileName } from './exporters';
@@ -57,7 +73,7 @@ import { canLinkFiles, chooseSaveTarget, encodeForFile, isDesktop, linkWritable,
 import { VersionPanel } from './VersionPanel';
 import { FormatPanel } from './FormatPanel';
 import * as I from './Icons';
-import { MapCanvas, type CanvasHandle, type CanvasTarget } from './MapCanvas';
+import { MapCanvas, type CanvasHandle, type CanvasTarget, type View as CanvasView } from './MapCanvas';
 import { ContextMenu, tidy, type CtxItem } from './ContextMenu';
 import type { NoteSave } from './NotePopover';
 import { canvasMeasure } from './measure';
@@ -144,7 +160,16 @@ function writePref(key: string, v: boolean) {
 
 export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap, shared }: Props) {
   const [hist, setHist] = useState<History<MindMap>>(() => initHistory(focusId ? revealTopic(initial, focusId) : initial));
-  const map = hist.present;
+  // The whole file. The editor shows and edits `map`: the outer map, or the
+  // inner map of the topic you entered (see core/inner.ts).
+  const doc = hist.present;
+  const [rawPath, setRawPath] = useState<InnerPath>(() => (focusId ? innerPathTo(initial, focusId) ?? [] : []));
+  const pathKey = rawPath.join('/');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const path = useMemo(() => validPath(doc, rawPath), [doc, pathKey]);
+  const pathRef = useRef(path);
+  pathRef.current = path;
+  const map = useMemo(() => viewOf(doc, path), [doc, path]);
   const startId = focusId && findTopic(initial, focusId) ? focusId : initial.roots[0].id;
   // The selected topic (the one the keyboard and the panel act on) and, with
   // multi-select, the other selected topics. Selecting one topic clears the rest.
@@ -196,7 +221,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const [fileState, setFileState] = useState<'ok' | 'needs-permission' | 'error'>('ok');
   const imageInput = useRef<HTMLInputElement>(null);
   const latest = useRef(initial);
-  latest.current = map;
+  latest.current = doc;
   const lastSnapshot = useRef(Date.now());
   // Read by the autosave timer without restarting it.
   const fileRef = useRef({ link, fileState });
@@ -322,6 +347,15 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       setToast(t('live.readOnly'));
       return;
     }
+    setHist((h) => push(h, writeBack(h.present, pathRef.current, next)));
+    if (select !== undefined) setSelectedId(select);
+  }, []);
+  /** Records a change made to the whole file (not to the view). */
+  const commitDoc = useCallback((next: MindMap, select?: string | null) => {
+    if (readOnlyRef.current) {
+      setToast(t('live.readOnly'));
+      return;
+    }
     setHist((h) => push(h, next));
     if (select !== undefined) setSelectedId(select);
   }, []);
@@ -349,9 +383,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
 
   // Every local change goes to the live session as it happens.
   useEffect(() => {
-    if (!session || map === fromLive.current) return;
-    session.localChange(map);
-  }, [map, session]);
+    if (!session || doc === fromLive.current) return;
+    session.localChange(doc);
+  }, [doc, session]);
 
   useEffect(() => {
     session?.select(selectedId);
@@ -391,10 +425,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   // Autosave shortly after each change. Maps always live on this device
   // first (and in their linked file, if any); a server syncs from here later.
   useEffect(() => {
-    if (map === initial || shared) return;
+    if (doc === initial || shared) return;
     setSaved('saving');
     const timer = setTimeout(() => {
-      const next = { ...map, version: map.version + 1 };
+      const next = { ...doc, version: doc.version + 1 };
       store
         .save(next)
         .then(() => {
@@ -409,26 +443,26 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (f.fileState !== 'needs-permission') writeFile(next, f.link, false);
     }, 400);
     return () => clearTimeout(timer);
-  }, [map, initial, store, writeFile, shared]);
+  }, [doc, initial, store, writeFile, shared]);
 
   /** "Save to computer": writes the linked file, or asks where to keep one. */
   const saveToFile = async (saveAs = false) => {
     try {
       if (link && !saveAs) {
-        await writeFile(map, link, true);
+        await writeFile(doc, link, true);
         setToast(t('toast.savedTo', { name: link.name }));
         return;
       }
-      const target = await chooseSaveTarget(`${safeFileName(map.title)}.keizu`);
+      const target = await chooseSaveTarget(`${safeFileName(doc.title)}.keizu`);
       if (target) {
         // If the link can't be stored it still works for this session.
         await store.setLink(map.id, target).catch(() => {});
         setLink(target);
-        await writeFile(map, target, true);
+        await writeFile(doc, target, true);
         setToast(t('toast.linked', { name: target.name }));
       } else if (!canLinkFiles()) {
         // Browsers without file handles: a one-off download.
-        if (await exportKeizu(map)) setToast(t('toast.downloaded'));
+        if (await exportKeizu(doc)) setToast(t('toast.downloaded'));
       }
     } catch (err) {
       setToast((err as Error).message || t('toast.saveFailed'));
@@ -436,7 +470,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   };
 
   const unlinkFile = async () => {
-    await store.setLink(map.id, undefined);
+    await store.setLink(doc.id, undefined);
     setLink(undefined);
     setFileState('ok');
     setToast(t('toast.unlinked'));
@@ -479,9 +513,19 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
 
   /** Selects a topic anywhere in the map, opening collapsed branches on the way. */
   const goTo = (id: string) => {
-    keepInFocus(id);
-    const shown = revealTopic(map, id);
-    if (shown !== map) commit(shown);
+    // It may sit in an inner map: go there first.
+    const p = innerPathTo(doc, id);
+    if (p && p.join('/') !== path.join('/')) {
+      setRawPath(p);
+      pathRef.current = p;
+      setEditingId(null);
+      setNoteId(null);
+    }
+    const target = p ?? path;
+    if (p && p.join('/') === path.join('/')) keepInFocus(id);
+    const v = viewOf(doc, target);
+    const shown = revealTopic(v, id);
+    if (shown !== v) commitDoc(writeBack(doc, target, shown));
     selectTopic(id);
     setSelectedRelId(null);
     if (view === 'map') setTimeout(() => canvas.current?.centerOn(id), 0);
@@ -519,6 +563,118 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       else if (tp.children.length) selectTopic(tp.children[0].id);
     }
   };
+
+  // ---------- inner maps ----------
+  const savedViews = useRef<CanvasView[]>([]);
+  const pendingMotion = useRef<(() => void) | null>(null);
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  const [insertOpen, setInsertOpen] = useState(false);
+  const [crumbAnim, setCrumbAnim] = useState(false);
+  useLayoutEffect(() => {
+    const run = pendingMotion.current;
+    pendingMotion.current = null;
+    run?.();
+  }, [pathKey]);
+  // A path that stopped being valid (undo, a collaborator's change) is trimmed.
+  useEffect(() => {
+    if (path.length !== rawPath.length) setRawPath(path);
+  }, [path, rawPath]);
+
+  // Branch colour of each entered topic, for its dot in the breadcrumb.
+  const crumbColors = useRef(new Map<string, string>());
+  const boxColor = (id: string) => crumbColors.current.get(id);
+  const boxLook = (id: string) => {
+    const b = layoutRef.current.byId.get(id);
+    if (!b) return { fill: theme.centralFill, radius: 12 };
+    const { fill } = nodeColors(b, theme);
+    return { fill: fill === 'transparent' ? theme.canvas : fill, radius: b.depth === 0 ? 12 : b.depth === 1 ? 9 : 7 };
+  };
+
+  const goToPath = (next: InnerPath) => {
+    setFocus(null);
+    setEditingId(null);
+    setNoteId(null);
+    setRelationFrom(null);
+    setRawPath(next);
+    pathRef.current = next;
+  };
+
+  const enterInner = (id: string | null = selectedId) => {
+    if (!id) return;
+    const tp = findTopic(doc, id);
+    if (!hasInner(tp)) return setToast(t('inner.none'));
+    const next = [...path, id];
+    const eb = layout.byId.get(id);
+    if (eb) crumbColors.current.set(id, eb.color);
+    const c = canvas.current, el = c?.element();
+    const from = c?.screenRect(id);
+    if (view === 'map' && c && el && from) {
+      savedViews.current[path.length] = c.getView();
+      const look = boxLook(id);
+      const ghost = ghostOf(el);
+      pendingMotion.current = () => {
+        const to = canvas.current?.screenRect(id);
+        if (!to) return ghost.remove();
+        playEnter({ live: el, ghost, from, to, ...look, canvasColor: theme.canvas });
+      };
+    }
+    setCrumbAnim(true);
+    goToPath(next);
+    selectTopic(id);
+  };
+
+  /** Leaves `levels` inner maps at once (the breadcrumb can skip several). */
+  const exitInner = (levels = 1) => {
+    if (!path.length) return;
+    const depth = Math.max(0, path.length - levels);
+    const leaving = path[depth];
+    const inner = path[path.length - 1];
+    const c = canvas.current, el = c?.element();
+    const from = c?.screenRect(inner);
+    if (view === 'map' && c && el && from) {
+      const ghost = ghostOf(el);
+      const saved = savedViews.current[depth];
+      pendingMotion.current = () => {
+        const cv = canvas.current;
+        if (saved) cv?.setView(saved);
+        const to = cv?.screenRect(leaving);
+        if (!to) return ghost.remove();
+        playExit({ live: el, ghost, from, to, ...boxLook(leaving), canvasColor: theme.canvas });
+      };
+    }
+    savedViews.current.length = depth;
+    setCrumbAnim(false);
+    goToPath(path.slice(0, depth));
+    selectTopic(leaving);
+  };
+
+  const insertMap = (other: MindMap) => {
+    setInsertOpen(false);
+    const parent = selectedId ?? mainId;
+    const r = insertMapAsTopic(map, other, parent);
+    commit(r.map, r.id);
+    setToast(t('inner.inserted', { title: other.title }));
+  };
+  const insertFromFile = async () => {
+    try {
+      const files = await pickFiles();
+      const f = files[0];
+      if (!f) return;
+      const maps = importFile(f.name, f.bytes);
+      if (maps[0]) insertMap(maps[0]);
+    } catch {
+      setToast(t('inner.insertFailed'));
+    }
+  };
+  const insertFromLibrary = async (id: string) => {
+    const m = await store.get(id).catch(() => undefined);
+    if (m) insertMap(m);
+    else setToast(t('toast.linkMissing'));
+  };
+
+  const selectedHasInner = !!selected?.innerSize;
+  const canMakeInner = !!selected && selectedId !== mainId && selected.children.length > 0;
 
   const actions = {
     addChild() {
@@ -583,7 +739,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     copy(cut = false) {
       if (!selected) return;
       const ids = multi ? topLevel(map, selectedIds) : [selected.id];
-      const topics = ids.map((id) => findTopic(map, id)!).filter(Boolean);
+      // From the file, so copied topics keep their inner maps.
+      const topics = ids.map((id) => findTopic(doc, id)!).filter(Boolean);
       const text = topicsToText(topics);
       topicClipboard = { topics, text };
       // Other apps get the topics as a Markdown list.
@@ -691,6 +848,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       else setToast(t('toast.mergeExists'));
     },
     floating(pos?: { x: number; y: number }) {
+      if (path.length) return setToast(t('inner.noFloating'));
       // Floating topics live outside any branch: leave focus mode to show them.
       if (focused) setFocus(null);
       pos ??= { x: 0, y: fullLayout.bounds.maxY + 120 };
@@ -816,9 +974,23 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         tp.note && view === 'map' && { type: 'item', id: 'note', label: cmdLabel('note'), icon: <I.NoteIcon size={16} />, run: () => setNoteId(id) },
         sep,
         view === 'map' && { type: 'item', id: 'focus', label: t('ctx.focus'), keys: keyOf('centerSelected'), icon: <I.Target size={16} />, run: () => canvas.current?.centerOn(id) },
+        !!tp.innerSize && item('enterInner', () => enterInner(id), { icon: <I.InnerIcon size={16} /> }),
       ]);
     }
+    // Inner map: go in, or make one.
+    const innerItems: (CtxItem | false)[] = multi
+      ? []
+      : tp.innerSize
+        ? [
+            item('enterInner', () => enterInner(id), { icon: <I.InnerIcon size={16} />, keys: t('ctx.dblClick') }),
+            !isMain && item('innerToBranch', commands.innerToBranch.run, { icon: <I.InnerIcon size={16} /> }),
+          ]
+        : isMain
+          ? []
+          : [hasKids ? item('branchToInner', commands.branchToInner.run, { icon: <I.InnerIcon size={16} /> }) : item('addInner', commands.addInner.run, { icon: <I.InnerIcon size={16} /> })];
     return tidy([
+      ...innerItems,
+      innerItems.length > 0 && sep,
       item('addChild', actions.addChild, { icon: <I.SubtopicIcon size={16} /> }),
       item('addSibling', () => actions.addSibling(), { icon: <I.TopicIcon size={16} /> }),
       sep,
@@ -907,9 +1079,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       { type: 'item', id: 'outline', label: t('ctx.outline'), keys: keyOf('toggleOutline'), icon: <I.OutlineIcon size={16} />, run: () => switchView('outline') },
       { type: 'item', id: 'present', label: cmdLabel('present'), keys: keyOf('present'), icon: <I.Present size={16} />, run: () => setPresenting(true) },
     ];
-    if (readOnly) return tidy([...viewItems, sep, ...more]);
+    const out: CtxItem | false = path.length > 0 && { type: 'item', id: 'exitInner', label: cmdLabel('exitInner'), keys: 'Esc', icon: <I.ExitInnerIcon size={16} />, run: () => exitInner() };
+    if (readOnly) return tidy([out, out && sep, ...viewItems, sep, ...more]);
     return tidy([
-      { type: 'item', id: 'floating', label: t('ctx.floatingHere'), icon: <I.FloatingIcon size={16} />, run: () => actions.floating(pos) },
+      out,
+      out && sep,
+      !path.length && { type: 'item', id: 'floating', label: t('ctx.floatingHere'), icon: <I.FloatingIcon size={16} />, run: () => actions.floating(pos) },
+      { type: 'item', id: 'insertMap', label: cmdLabel('insertMap'), icon: <I.InnerIcon size={16} />, run: () => setInsertOpen(true) },
       topicClipboard && {
         type: 'item',
         id: 'paste',
@@ -1020,12 +1196,39 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     focus: { run: actions.focus, enabled: !!focused || (!!selectedId && selectedId !== mainId && !!selected && !isSummaryTopic(map, selectedId)) },
     boundary: { run: actions.boundary, enabled: !!selectedId && canGroup },
     summary: { run: actions.summary, enabled: !!selectedId && canGroup },
+    enterInner: { run: () => enterInner(), enabled: selectedHasInner },
+    exitInner: { run: () => exitInner(), enabled: path.length > 0 },
+    branchToInner: {
+      run: () => {
+        if (!selectedId) return;
+        commit(branchToInner(map, selectedId), selectedId);
+        setToast(t('inner.converted'));
+      },
+      enabled: canMakeInner && !readOnly,
+    },
+    innerToBranch: {
+      run: () => {
+        if (!selectedId) return;
+        commitDoc(innerToBranch(doc, selectedId), selectedId);
+        setToast(t('inner.expanded'));
+      },
+      enabled: selectedHasInner && selectedId !== mainId && !readOnly,
+    },
+    addInner: {
+      run: () => {
+        if (!selectedId) return;
+        const r = addInner(doc, selectedId, t('topic.default'));
+        if (r.id) commitDoc(r.map, selectedId);
+      },
+      enabled: !!selected && !selectedHasInner && selectedId !== mainId && !readOnly,
+    },
+    insertMap: { run: () => setInsertOpen(true), enabled: !readOnly },
   };
 
   // Keyboard shortcuts (inactive while typing in a field or a dialog is open).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editingId || keysOpen || presenting || shareOpen || ctx) return;
+      if (editingId || keysOpen || presenting || shareOpen || ctx || insertOpen) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       const combo = comboFromEvent(e);
@@ -1058,6 +1261,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           setToast(null);
         } else if (relationFrom) setRelationFrom(null);
         else if (focused) exitFocus();
+        else if (path.length) exitInner();
         else selectTopic(null), setSelectedRelId(null), setSelectedBoundaryId(null);
         return;
       }
@@ -1110,10 +1314,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       if (kind === 'png') await exportPng(map, fullLayout, theme);
       if (kind === 'svg') await exportSvg(map, fullLayout, theme);
       if (kind === 'pdf') await exportPdf(map, fullLayout, theme);
-      if (kind === 'md') await exportMarkdown(map);
-      if (kind === 'opml') await exportOpml(map);
-      if (kind === 'keizu') await exportKeizu(map);
-      if (kind === 'json') await exportPlainJson(map);
+      // Files hold everything, inner maps included; pictures show what you see.
+      if (kind === 'md') await exportMarkdown(doc);
+      if (kind === 'opml') await exportOpml(doc);
+      if (kind === 'keizu') await exportKeizu(doc);
+      if (kind === 'json') await exportPlainJson(doc);
     } catch (err) {
       setToast((err as Error).message || t('toast.exportFailed'));
     }
@@ -1420,6 +1625,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onCommitEdit={commitEdit}
               onCancelEdit={cancelEdit}
               onMove={(id, parent, merge) => (merge ? actions.link(id, parent) : commit(moveTopic(map, id, parent)))}
+              onEnterInner={(id) => enterInner(id)}
+              viewKey={pathKey}
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
               onZoomChange={setZoom}
               onOpenLink={(id) => actions.openLink(id)}
@@ -1452,8 +1659,33 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onContextMenu={(id, x, y) => openMenu({ kind: 'topic', id }, x, y)}
             />
           )}
+          {path.length > 0 && (
+            <nav className="crumbs" aria-label={t('inner.crumbs')}>
+              <button className="up" aria-label={t('inner.up')} title={tip('exitInner', t('inner.up'))} onClick={() => exitInner()}>
+                <I.Undo size={15} />
+              </button>
+              {[doc.roots[0].id, ...path].map((id, i, all) => {
+                const tp = findTopic(doc, id);
+                const last = i === all.length - 1;
+                const color = i > 0 ? boxColor(id) : undefined;
+                return (
+                  <span key={id} style={{ display: 'contents' }}>
+                    {i > 0 && <span className="sep">›</span>}
+                    <button
+                      className={last && crumbAnim ? 'new' : undefined}
+                      aria-current={last ? 'location' : undefined}
+                      onClick={() => !last && exitInner(all.length - 1 - i)}
+                    >
+                      {color && <span className="dot" style={{ background: color }} />}
+                      <span className="tx">{i === 0 ? doc.title : tp?.text}</span>
+                    </button>
+                  </span>
+                );
+              })}
+            </nav>
+          )}
           {view === 'map' && focused && (
-            <nav className="focus-bar" aria-label={t('focus.label')}>
+            <nav className="focus-bar" aria-label={t('focus.label')} style={path.length ? { top: 60 } : undefined}>
               <I.FocusIcon size={15} />
               <ol>
                 {focusPath.map((p, i) => (
@@ -1494,6 +1726,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         {multi && <span className="sb-sel">{t('status.selected', { n: selectedIds.length })}</span>}
         {live.peers.length > 0 && <span>{t('live.peers', { n: live.peers.length })}</span>}
         <span>{layoutName(map.layout)}</span>
+        {path.length > 0 && <span>{t('inner.where', { n: path.length })}</span>}
         {focused && <span>{t('status.focus', { name: focused.text.split('\n')[0] })}</span>}
         <button className="sb-lang" title={t('status.lang')} onClick={() => commands.language.run()}>{getLang().toUpperCase()}</button>
       </footer>
@@ -1502,12 +1735,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         {historyOpen && (
           <VersionPanel
             store={store}
-            map={map}
+            map={doc}
             fontsReady={fontsReady}
             onClose={() => setHistoryOpen(false)}
             onRestore={async (old) => {
-              await store.addVersion(map, 'restore').catch(() => {});
-              commit({ ...old, id: map.id, version: map.version, updatedAt: new Date().toISOString() }, old.roots[0].id);
+              await store.addVersion(doc, 'restore').catch(() => {});
+              goToPath([]);
+              commitDoc({ ...old, id: doc.id, version: doc.version, updatedAt: new Date().toISOString() }, old.roots[0].id);
               setToast(t('toast.restored', { key: fmt(keymap.undo[0] ?? 'Mod+Z') }));
             }}
           />
@@ -1539,12 +1773,50 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
             onHref={(h) => selectedId && commit(updateTopic(map, selectedId, { href: h || undefined }))}
             maps={libraryMaps}
             onMap={(p) => commit(setMapProps(map, p))}
+            topicExtra={
+              selected && selectedId !== mainId ? (
+                <section>
+                  <h3 className="lbl">{t('inner.section')}</h3>
+                  <p className="muted" style={{ marginBottom: 8 }}>{t('inner.sectionHint')}</p>
+                  <div className="inner-actions">
+                    {selectedHasInner ? (
+                      <>
+                        <button className="btn primary" onClick={() => enterInner()}>{t('inner.enter')}</button>
+                        <button className="btn" onClick={commands.innerToBranch.run}>{t('inner.toBranch')}</button>
+                      </>
+                    ) : canMakeInner ? (
+                      <button className="btn" onClick={commands.branchToInner.run}>{t('inner.toInner')}</button>
+                    ) : (
+                      <button className="btn" onClick={commands.addInner.run}>{t('inner.add')}</button>
+                    )}
+                  </div>
+                </section>
+              ) : undefined
+            }
           />
         )}
       </div>
 
       {paletteOpen && (
-        <CommandPalette map={map} commands={paletteCommands} onPickTopic={goTo} onClose={() => setPaletteOpen(false)} />
+        <CommandPalette map={doc} commands={paletteCommands} onPickTopic={goTo} onClose={() => setPaletteOpen(false)} />
+      )}
+      {insertOpen && (
+        <div className="dialog-backdrop" onPointerDown={(e) => e.target === e.currentTarget && setInsertOpen(false)}>
+          <div className="dialog" role="dialog" aria-label={t('inner.insertTitle')} onKeyDown={(e) => e.key === 'Escape' && setInsertOpen(false)}>
+            <div className="sc-head">
+              <strong>{t('inner.insertTitle')}</strong>
+              <button className="ib" aria-label={t('common.close')} onClick={() => setInsertOpen(false)}>×</button>
+            </div>
+            <p className="muted">{t('inner.insertHint')}</p>
+            <div className="map-pick">
+              {libraryMaps.filter((m) => m.id !== doc.id).map((m) => (
+                <button key={m.id} onClick={() => insertFromLibrary(m.id)}>{m.title}</button>
+              ))}
+              {!libraryMaps.some((m) => m.id !== doc.id) && <p className="muted">{t('inner.insertEmpty')}</p>}
+            </div>
+            <button className="btn" onClick={insertFromFile}>{t('inner.insertFromFile')}</button>
+          </div>
+        </div>
       )}
       {ctx && (
         <ContextMenu
@@ -1558,7 +1830,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         />
       )}
       {keysOpen && <KeysDialog onClose={() => setKeysOpen(false)} />}
-      {shareOpen && <ShareDialog map={map} onClose={() => setShareOpen(false)} onShared={live.enable} />}
+      {shareOpen && <ShareDialog map={doc} onClose={() => setShareOpen(false)} onShared={live.enable} />}
       {presenting && (
         <Presentation
           map={map}

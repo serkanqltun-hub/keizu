@@ -35,6 +35,8 @@ interface Props {
   /** Other maps in the library, for linking a topic to one. */
   maps: { id: string; title: string }[];
   onMap(patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'notebook'>>): void;
+  /** More topic settings, shown under the topic's own (inner map actions). */
+  topicExtra?: React.ReactNode;
 }
 
 const SHAPES: { id: TopicShape; css: React.CSSProperties }[] = [
@@ -81,7 +83,7 @@ function LayoutGlyph({ id, d }: { id: LayoutKind; d: string }) {
 }
 
 export function FormatPanel(props: Props) {
-  const { map, topic, relation, isRoot, count = 1, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete, boundary, summary } = props;
+  const { map, topic, relation, isRoot, count = 1, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete, boundary, summary, topicExtra } = props;
   return (
     <aside className="panel" aria-label={t('panel.label')}>
       <div role="tablist" className="tabs">
@@ -116,6 +118,7 @@ export function FormatPanel(props: Props) {
             onHref={onHref}
             maps={maps.filter((m) => m.id !== map.id)}
           />
+          {topicExtra}
           </>
         ) : (
           <p className="muted">{t('panel.pickTopic')}</p>

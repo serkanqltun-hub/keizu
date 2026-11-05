@@ -19,6 +19,13 @@ export interface CanvasHandle {
   centerRoot(): void;
   /** Pans (and zooms in if far out) so a topic sits in the middle. */
   centerOn(id: string): void;
+  /** The camera, for putting it back where it was (inner maps). */
+  getView(): View;
+  setView(v: View): void;
+  /** Where a topic is drawn, in pixels from the canvas's top left corner. */
+  screenRect(id: string): { x: number; y: number; w: number; h: number } | undefined;
+  /** The canvas element, for the enter/exit animation. */
+  element(): HTMLDivElement | null;
   /** Back to 100 %, around the middle of the canvas. */
   resetZoom(): void;
   /** Where a topic is on screen (client coordinates), if it is drawn. */
@@ -75,6 +82,13 @@ interface Props {
   onOpenNote?(id: string): void;
   onCloseNote?(): void;
   onSaveNote?(id: string, save: NoteSave): void;
+  /** A topic's inner map was asked for (double-click, or its corner badge). */
+  onEnterInner?(id: string): void;
+  /**
+   * Which (inner) map is shown. When it changes the canvas fits the new map
+   * at once; the editor may then put back a saved camera.
+   */
+  viewKey?: string;
   /** View only: no dragging, no new topics. */
   readOnly?: boolean;
   /** Every selected topic, when more than one is (multi-select). */
@@ -94,7 +108,7 @@ interface Props {
   peers?: { id: string; name: string; color: string; selectedId?: string | null }[];
 }
 
-interface View {
+export interface View {
   x: number;
   y: number;
   k: number;
@@ -108,6 +122,8 @@ const BRUSH_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
 const MIN_K = 0.05;
 const MAX_K = 3;
 const clampK = (k: number) => Math.min(MAX_K, Math.max(MIN_K, k));
+/** The canvas's size, unaffected by CSS transforms (the inner-map animation scales it). */
+const sizeOf = (el: HTMLElement | null) => (el ? { width: el.clientWidth, height: el.clientHeight } : undefined);
 
 function subtreeIds(t: Topic, out = new Set<string>()) {
   out.add(t.id);
@@ -148,7 +164,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     (k: number, cx?: number, cy?: number) => {
       setView((v) => {
         const nk = clampK(k);
-        const rect = wrap.current?.getBoundingClientRect();
+        const rect = sizeOf(wrap.current);
         const px = cx ?? (rect ? rect.width / 2 : 0);
         const py = cy ?? (rect ? rect.height / 2 : 0);
         // Keep the point under the cursor fixed.
@@ -232,7 +248,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   /** Zooms by a factor around a point on the canvas (its centre by default), eased. */
   const zoomAt = useCallback(
     (f: number, px?: number, py?: number) => {
-      const rect = wrap.current?.getBoundingClientRect();
+      const rect = sizeOf(wrap.current);
       const ax = px ?? (rect ? rect.width / 2 : 0), ay = py ?? (rect ? rect.height / 2 : 0);
       const base = cam.current.anchor && cam.current.target ? cam.current.target : viewRef.current;
       const k = clampK(base.k * f);
@@ -243,7 +259,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   );
 
   const fitView = useCallback((): View | null => {
-    const rect = wrap.current?.getBoundingClientRect();
+    const rect = sizeOf(wrap.current);
     if (!rect) return null;
     const { minX, minY, maxX, maxY } = layout.bounds;
     const w = maxX - minX + 120, h = maxY - minY + 120;
@@ -257,14 +273,14 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   }, [fitView, animateTo]);
 
   const centerRoot = useCallback(() => {
-    const rect = wrap.current?.getBoundingClientRect();
+    const rect = sizeOf(wrap.current);
     if (!rect) return;
     setView((v) => ({ ...v, x: rect.width / 2, y: rect.height / 2 }));
   }, []);
 
   const centerView = useCallback(
     (id: string): View | null => {
-      const rect = wrap.current?.getBoundingClientRect();
+      const rect = sizeOf(wrap.current);
       const b = layout.byId.get(id);
       if (!rect || !b) return null;
       const k = Math.max((cam.current.target ?? viewRef.current).k, 0.8);
@@ -295,13 +311,26 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     ref,
     () => ({
       zoomBy: (f) => zoomAt(f),
-      resetZoom: () => zoomAt(1 / (cam.current.target ?? viewRef.current).k),
       fit,
       centerRoot,
       centerOn,
+      getView: () => viewRef.current,
+      setView: (v) => {
+        stopCamera();
+        viewRef.current = v;
+        setView(v);
+      },
+      screenRect: (id) => {
+        const b = layout.byId.get(id);
+        if (!b) return undefined;
+        const v = viewRef.current;
+        return { x: (b.x - b.w / 2) * v.k + v.x, y: (b.y - b.h / 2) * v.k + v.y, w: b.w * v.k, h: b.h * v.k };
+      },
+      element: () => wrap.current,
+      resetZoom: () => zoomAt(1 / (cam.current.target ?? viewRef.current).k),
       topicRect,
     }),
-    [zoomAt, fit, centerRoot, centerOn, topicRect],
+    [zoomAt, fit, centerRoot, centerOn, stopCamera, layout, topicRect],
   );
 
   // Fit the map when it is opened (at once) and when its layout kind changes
@@ -317,6 +346,22 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     opened.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map.id, map.layout]);
+
+  // Entering or leaving an inner map: show the new map whole, at once.
+  const shownKey = useRef(props.viewKey);
+  useLayoutEffect(() => {
+    if (shownKey.current === props.viewKey) return;
+    shownKey.current = props.viewKey;
+    // A focus mode left by the same switch must not move the camera too.
+    lastScope.current = props.scopeId ?? null;
+    viewBeforeFocus.current = null;
+    const v = fitView();
+    if (v) {
+      stopCamera();
+      viewRef.current = v;
+      setView(v);
+    }
+  }, [props.viewKey, fitView, stopCamera]);
 
   // Focus mode: zoom to the focused branch, and back to the earlier view on leaving.
   const scope = props.scopeId ?? null;
@@ -338,7 +383,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   useEffect(() => {
     if (!selectedId || gesture.current) return;
     const b = layout.byId.get(selectedId);
-    const rect = wrap.current?.getBoundingClientRect();
+    const rect = sizeOf(wrap.current);
     if (!b || !rect) return;
     // Works on where the camera is heading, even a fit() started a moment ago.
     const v = cam.current.target ?? viewRef.current;
@@ -422,6 +467,11 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     const el = e.target as Element;
     // A click anywhere on the canvas closes an open note card (which saves it).
     if (props.noteId) props.onCloseNote?.();
+    const badge = el.closest('[data-inner-badge]');
+    if (badge && e.button === 0 && props.onEnterInner) {
+      props.onEnterInner(badge.getAttribute('data-inner-badge')!);
+      return;
+    }
     const collapse = el.closest('[data-collapse-id]');
     if (collapse) {
       props.onToggleCollapse(collapse.getAttribute('data-collapse-id')!);
@@ -574,7 +624,9 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
 
   const onDoubleClick = (e: React.MouseEvent) => {
     const p = toMap(e.clientX, e.clientY);
-    const topicId = (e.target as Element).closest('[data-topic-id]')?.getAttribute('data-topic-id') ?? (simple ? hitTest(p.x, p.y, null)?.id : undefined);
+    // Pointer capture sends the double-click to the canvas itself, so find the topic by position too.
+    const topicId = (e.target as Element).closest('[data-topic-id]')?.getAttribute('data-topic-id') ?? hitTest(p.x, p.y, null)?.id;
+    if (topicId && layout.byId.get(topicId)?.topic.innerSize && props.onEnterInner) return props.onEnterInner(topicId);
     if (props.readOnly) return;
     // In a topic that shows its note, double-clicking the note edits the note.
     if (topicId && (e.target as Element).closest('[data-note-text]') && props.onOpenNote) {
@@ -584,7 +636,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     else if (!(e.target as Element).closest('[data-relation-id], [data-boundary-id]')) props.onCreateFloating(toMap(e.clientX, e.clientY));
   };
 
-  const drawn = useLayoutMotion(layout, map.id);
+  const drawn = useLayoutMotion(layout, `${map.id}|${props.viewKey ?? ""}`);
   const dragBox = drag ? layout.byId.get(drag.id) : undefined;
   const targetBox = drag?.target ? layout.byId.get(drag.target) : undefined;
   // Flow charts: dropping a step on another merges the paths (Shift moves it).

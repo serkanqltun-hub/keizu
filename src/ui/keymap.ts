@@ -52,9 +52,16 @@ export type CommandId =
   | 'formatPainter'
   | 'copyStyle'
   | 'pasteStyle'
+  | 'enterInner'
+  | 'exitInner'
+  | 'branchToInner'
+  | 'innerToBranch'
+  | 'addInner'
+  | 'insertMap'
   | 'focus'
   | 'boundary'
   | 'summary';
+
 
 export interface CommandDef {
   id: CommandId;
@@ -112,6 +119,12 @@ export const COMMANDS: CommandDef[] = [
   { id: 'panel', keys: [], group: 'view' },
   { id: 'present', keys: ['F5'], group: 'view' },
   { id: 'openLink', keys: ['Alt+Enter'], group: 'navigate' },
+  { id: 'enterInner', keys: ['Mod+Alt+ArrowDown'], group: 'navigate' },
+  { id: 'exitInner', keys: ['Mod+Alt+ArrowUp'], group: 'navigate' },
+  { id: 'branchToInner', keys: [], group: 'edit' },
+  { id: 'innerToBranch', keys: [], group: 'edit' },
+  { id: 'addInner', keys: [], group: 'edit' },
+  { id: 'insertMap', keys: [], group: 'edit' },
   { id: 'share', keys: [], group: 'file' },
   { id: 'save', keys: ['Mod+S'], group: 'file' },
   { id: 'saveAs', keys: ['Mod+Shift+S'], group: 'file' },

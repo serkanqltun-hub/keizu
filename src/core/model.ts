@@ -58,6 +58,21 @@ export interface Topic {
   markers?: string[];
   collapsed?: boolean;
   style?: TopicStyle;
+  /**
+   * This topic belongs to its parent's inner map: it is drawn only when you
+   * enter the parent, not on the canvas around it.
+   */
+  inside?: boolean;
+  /** Layout of this topic's inner map (when it has one). */
+  innerLayout?: LayoutKind;
+  /**
+   * What kind of inner view the topic opens. Unset means a map made of its
+   * `inside` children; other kinds (such as a free drawing canvas) keep their
+   * own data and plug into the same enter/exit flow.
+   */
+  innerKind?: string;
+  /** View only, never stored: how many topics the hidden inner map holds. */
+  innerSize?: number;
   children: Topic[];
   /** Outlines drawn around runs of this topic's children. */
   boundaries?: Boundary[];

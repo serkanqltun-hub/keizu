@@ -474,6 +474,25 @@ button.nav-item:hover:not(.on) { background: var(--soft); }
 .ctx-sw:hover, .ctx-sw.kb { transform: scale(1.15); }
 .ctx-sw.checked, .ctx-sw.kb { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent); }
 @media (pointer: coarse) { .ctx-item { height: 40px; } .ctx-sw { width: 24px; height: 24px; } }
+/* ---------- inner maps ---------- */
+.inner-ghost { position: absolute; inset: 0; z-index: 1; pointer-events: none; will-change: transform, opacity; }
+.inner-portal { position: absolute; z-index: 2; pointer-events: none; will-change: left, top, width, height; }
+.crumbs { position: absolute; left: 12px; top: 12px; z-index: 4; display: flex; align-items: center; gap: 2px; max-width: calc(100% - 24px); padding: 4px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 4px 14px rgba(16, 24, 40, 0.08); font-size: 13px; overflow-x: auto; }
+.crumbs button { border: 0; background: transparent; color: var(--muted); font: 500 13px var(--font); padding: 5px 8px; border-radius: 7px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; max-width: 220px; }
+.crumbs button span.tx { overflow: hidden; text-overflow: ellipsis; }
+.crumbs button:hover:not([aria-current]) { background: var(--soft); color: var(--ink); }
+.crumbs button[aria-current] { color: var(--ink); font-weight: 700; cursor: default; }
+.crumbs .sep { color: var(--muted); opacity: 0.6; }
+.crumbs .dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+.crumbs .up { padding: 5px 6px; color: var(--ink-2); }
+.crumbs .new { animation: kz-crumb var(--dur-smooth, 220ms) cubic-bezier(.2, .8, .2, 1) both; }
+@keyframes kz-crumb { from { opacity: 0; transform: translateX(-8px); } }
+.kz-reduce-motion .crumbs .new { animation: none; }
+.inner-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.map-pick { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; margin: 10px 0; }
+.map-pick button { text-align: left; border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 9px 12px; font: 500 13px var(--font); color: var(--ink); }
+.map-pick button:hover { background: var(--soft); }
+
 /* Focus mode: the path to the focused branch, over the canvas. */
 .focus-bar { position: absolute; left: 16px; top: 14px; max-width: calc(100% - 32px); display: flex; align-items: center; gap: 8px; padding: 5px 6px 5px 12px; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06); color: var(--ink-2); font-size: 13px; animation: kz-pop var(--dur-smooth) var(--ease); }
 .focus-bar ol { display: flex; align-items: center; min-width: 0; margin: 0; padding: 0; list-style: none; overflow: hidden; }
