@@ -30,7 +30,7 @@ export interface CrdtDoc {
   meta: Fields;
   /** Topic fields plus `place` and `del`. */
   topics: Record<string, Fields>;
-  /** Relation fields (from, to, label) plus `del`. */
+  /** Relation fields (from, to, label, kind) plus `del`. */
   relations: Record<string, Fields>;
   /** Highest Lamport time seen. */
   clock: number;
@@ -64,6 +64,7 @@ export interface RelationLike {
   from: string;
   to: string;
   label?: string;
+  kind?: 'flow';
 }
 
 export interface MapLike {
@@ -72,12 +73,13 @@ export interface MapLike {
   layout: string;
   branchStyle: string;
   multicolor: boolean;
+  notebook?: boolean;
   roots: TopicLike[];
   relations: RelationLike[];
   resources?: Record<string, string>;
 }
 
-const META_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor'];
+const META_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor', 'notebook'];
 const RES = 'res:';
 
 export function emptyDoc(): CrdtDoc {
@@ -248,6 +250,7 @@ export function diff(doc: CrdtDoc, next: MapLike): Change[] {
     set('r', r.id, 'from', r.from);
     set('r', r.id, 'to', r.to);
     set('r', r.id, 'label', r.label);
+    set('r', r.id, 'kind', r.kind);
   }
   for (const id of Object.keys(doc.relations)) if (!rels.has(id) && isLive(doc, 'r', id)) out.push({ k: 'r', id, f: 'del', v: true });
   return out;
@@ -326,6 +329,7 @@ export function materialize(doc: CrdtDoc): MapLike {
     if (!shown.has(from) || !shown.has(to)) continue;
     const r: RelationLike = { id, from, to };
     if (typeof f.label?.v === 'string') r.label = f.label.v;
+    if (f.kind?.v === 'flow') r.kind = 'flow';
     relations.push(r);
   }
   relations.sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -339,6 +343,7 @@ export function materialize(doc: CrdtDoc): MapLike {
     layout: String(m('layout', 'mindmap')),
     branchStyle: String(m('branchStyle', 'curve')),
     multicolor: m('multicolor', true) !== false,
+    ...(m('notebook', false) === true ? { notebook: true } : {}),
     roots,
     relations,
     resources: Object.keys(resources).length ? resources : undefined,

@@ -57,6 +57,8 @@ describe('inner maps', () => {
     const doc = writeBack(g.map, [g.a], updateTopic(r.map, g.a, { text: 'A op.' }));
     expect(findTopic(doc, r.id)!.inside).toBe(true);
     expect(findTopic(doc, g.a)!.text).toBe('A op.');
+    // The map keeps its own title.
+    expect(doc.title).toBe(g.map.title);
     // The outer map still hides it, and B's inner map is untouched.
     expect(findTopic(viewOf(doc, []), r.id)).toBeUndefined();
     expect(findTopic(doc, g.s)!.inside).toBe(true);

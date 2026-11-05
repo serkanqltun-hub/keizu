@@ -10,6 +10,8 @@ interface Props {
   topic: Topic | undefined;
   relation: Relation | undefined;
   isRoot: boolean;
+  /** How many topics are selected; above 1 the changes go to all of them. */
+  count?: number;
   /** Layout the selected topic's branch gets when it has none of its own. */
   inheritedLayout: LayoutKind;
   onRelationLabel(label: string): void;
@@ -24,7 +26,7 @@ interface Props {
   onHref(href: string): void;
   /** Other maps in the library, for linking a topic to one. */
   maps: { id: string; title: string }[];
-  onMap(patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor'>>): void;
+  onMap(patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'notebook'>>): void;
   /** More topic settings, shown under the topic's own (inner map actions). */
   topicExtra?: React.ReactNode;
 }
@@ -45,6 +47,7 @@ const LAYOUTS: { id: LayoutKind; d: string }[] = [
   { id: 'timeline', d: 'M11 14h27M17 14v-6h5M26 14v6h5M35 14v-6' },
   { id: 'fishbone', d: 'M27 14H3M22 14l-5-9M22 14l-5 9M12 14L7 5M12 14l-5 9' },
   { id: 'matrix', d: 'M14 3h24v22H14zM22 3v22M30 3v22M14 10h24M14 17h24' },
+  { id: 'flow', d: 'M9 14h3M12 6v16M12 6h3M12 22h3M23 6h2v8M23 22h2v-8M25 14h4' },
 ];
 
 const BRANCHES: BranchStyle[] = ['curve', 'elbow', 'straight'];
@@ -58,12 +61,20 @@ function LayoutGlyph({ id, d }: { id: LayoutKind; d: string }) {
       {id === 'timeline' && <rect x="1" y="11" width="10" height="6" rx="2" />}
       {id === 'fishbone' && <rect x="27" y="11" width="11" height="6" rx="2" />}
       {id === 'matrix' && <rect x="3" y="3" width="10" height="7" rx="1" />}
+      {id === 'flow' && (
+        <>
+          <rect x="1" y="11" width="8" height="6" rx="2" />
+          <rect x="15" y="3" width="8" height="6" rx="2" />
+          <rect x="15" y="19" width="8" height="6" rx="2" />
+          <rect x="29" y="11" width="9" height="6" rx="2" />
+        </>
+      )}
       <path d={d} />
     </svg>
   );
 }
 
-export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete, topicExtra }: Props) {
+export function FormatPanel({ map, topic, relation, isRoot, count = 1, inheritedLayout, tab, onTab, onStyle, onBranchLayout, onMarker, onNote, onLinkLabel, onHref, maps, onMap, onRelationLabel, onRelationDelete, topicExtra }: Props) {
   return (
     <aside className="panel" aria-label={t('panel.label')}>
       <div role="tablist" className="tabs">
@@ -79,6 +90,7 @@ export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab
             key={topic.id}
             topic={topic}
             isRoot={isRoot}
+            count={count}
             inheritedLayout={inheritedLayout}
             onStyle={onStyle}
             onBranchLayout={onBranchLayout}
@@ -103,6 +115,7 @@ export function FormatPanel({ map, topic, relation, isRoot, inheritedLayout, tab
 function TopicSection({
   topic,
   isRoot,
+  count,
   inheritedLayout,
   onStyle,
   onBranchLayout,
@@ -114,6 +127,7 @@ function TopicSection({
 }: {
   topic: Topic;
   isRoot: boolean;
+  count: number;
   inheritedLayout: LayoutKind;
   onStyle(p: TopicStyle): void;
   onBranchLayout(l: LayoutKind | undefined): void;
@@ -127,13 +141,21 @@ function TopicSection({
   const [note, setNote] = useState(topic.note ?? '');
   useEffect(() => setNote(topic.note ?? ''), [topic.note]);
   const [linkLabel, setLinkLabel] = useState(topic.linkLabel ?? '');
+  const inFlow = (topic.layout ?? inheritedLayout) === 'flow';
   useEffect(() => setLinkLabel(topic.linkLabel ?? ''), [topic.linkLabel]);
   const internal = topic.href?.startsWith('keizu:') ? topic.href : '';
   const [url, setUrl] = useState(internal ? '' : topic.href ?? '');
   useEffect(() => setUrl(topic.href?.startsWith('keizu:') ? '' : topic.href ?? ''), [topic.href]);
   const linkedMapId = internal ? /^keizu:map\/([^#]+)/.exec(internal)?.[1] : undefined;
+  const many = count > 1;
   return (
     <>
+      {many && (
+        <section className="multi-note" role="status">
+          <strong>{t('panel.multi', { n: count })}</strong>
+          <p className="muted small">{t('panel.multiHint')}</p>
+        </section>
+      )}
       <section>
         <h3 className="lbl">{t('panel.shape')}</h3>
         <div className="grid5">
@@ -171,7 +193,7 @@ function TopicSection({
         </div>
       </section>
 
-      {!isRoot && (
+      {(!isRoot || many) && (
         <section>
           <h3 className="lbl">{t('panel.branchLayout')}</h3>
           <div className="grid4">
@@ -212,6 +234,8 @@ function TopicSection({
         </div>
       </section>
 
+      {!many && (
+      <>
       <section>
         <label className="field">
           <span className="lbl">{t('panel.note')}</span>
@@ -237,10 +261,10 @@ function TopicSection({
         <h3 className="lbl">{t('panel.link')}</h3>
         {!isRoot && (
           <label className="field">
-            <span className="small muted">{t('panel.linkLabel')}</span>
+            <span className="small muted">{t(inFlow ? 'panel.flowLabel' : 'panel.linkLabel')}</span>
             <input
               value={linkLabel}
-              placeholder={t('panel.linkLabelPlaceholder')}
+              placeholder={t(inFlow ? 'panel.flowPlaceholder' : 'panel.linkLabelPlaceholder')}
               onChange={(e) => setLinkLabel(e.target.value)}
               onBlur={() => linkLabel.trim() !== (topic.linkLabel ?? '') && onLinkLabel(linkLabel.trim())}
               onKeyDown={(e) => {
@@ -279,6 +303,8 @@ function TopicSection({
         </label>
         {topic.href && <p className="muted small">{t('panel.linkHint')}</p>}
       </section>
+      </>
+      )}
     </>
   );
 }
@@ -326,6 +352,10 @@ function MapSection({ map, onMap }: { map: MindMap; onMap: Props['onMap'] }) {
           {t('panel.multicolor')}
           <input type="checkbox" checked={map.multicolor} onChange={(e) => onMap({ multicolor: e.target.checked })} />
         </label>
+        <label className="check" title={t('tb.notebookTip')}>
+          {t('cmd.notebook')}
+          <input type="checkbox" checked={!!map.notebook} onChange={(e) => onMap({ notebook: e.target.checked })} />
+        </label>
       </section>
     </>
   );
@@ -335,13 +365,14 @@ function RelationSection({ relation, onLabel, onDelete }: { relation: Relation; 
   const [label, setLabel] = useState(relation.label ?? '');
   return (
     <section>
-      <h3 className="lbl">{t('panel.relation')}</h3>
+      <h3 className="lbl">{t(relation.kind === 'flow' ? 'panel.flowLink' : 'panel.relation')}</h3>
       <label className="field">
         <span className="muted">{t('panel.label2')}</span>
         <input
+          id="relation-label"
           className="text-input"
           value={label}
-          placeholder={t('panel.relationPlaceholder')}
+          placeholder={t(relation.kind === 'flow' ? 'panel.flowPlaceholder' : 'panel.relationPlaceholder')}
           onChange={(e) => setLabel(e.target.value)}
           onBlur={() => label !== (relation.label ?? '') && onLabel(label.trim())}
           onKeyDown={(e) => {

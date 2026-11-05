@@ -8,7 +8,7 @@
 import type { MindMap, Relation, Topic } from '../core/model';
 
 const TOPIC_FIELDS = ['text', 'image', 'pos', 'layout', 'note', 'markers', 'collapsed', 'style'] as const;
-const MAP_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor'] as const;
+const MAP_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor', 'notebook'] as const;
 const ROOT = '\u0000root';
 
 interface Flat {

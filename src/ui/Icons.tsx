@@ -57,6 +57,8 @@ export const SubtopicIcon = (p: P) => (
   </Svg>
 );
 export const MarkerIcon = (p: P) => <Svg {...p}><path d="M5 21V4h11l-2 4 2 4H5" /></Svg>;
+export const NotebookIcon = (p: P) => <Svg {...p}><path d="M5 4h12a2 2 0 0 1 2 2v14H7a2 2 0 0 1-2-2z" /><path d="M5 18a2 2 0 0 1 2-2h12M9 8h6M9 11h4" /></Svg>;
+export const BrushIcon = (p: P) => <Svg {...p}><rect x="4" y="3" width="14" height="6" rx="1.5" /><path d="M18 6h2v5h-8v3" /><rect x="10.5" y="14" width="3" height="7" rx="1" /></Svg>;
 export const NoteIcon = (p: P) => <Svg {...p}><path d="M6 3h9l4 4v14H6z" /><path d="M9 11h7M9 15h7" /></Svg>;
 export const Trash = (p: P) => <Svg {...p}><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13" /></Svg>;
 export const Export = (p: P) => <Svg {...p}><path d="M12 15V3M8 7l4-4 4 4" /><path d="M5 13v7h14v-7" /></Svg>;
@@ -69,6 +71,10 @@ export const Search = (p: P) => <Svg {...p}><circle cx="11" cy="11" r="6" /><pat
 export const Import = (p: P) => <Svg {...p}><path d="M12 3v12M8 11l4 4 4-4" /><path d="M5 13v7h14v-7" /></Svg>;
 export const Check = (p: P) => <Svg {...p}><path d="M5 12.5l4.5 4.5L19 7.5" /></Svg>;
 export const Keyboard = (p: P) => <Svg {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10" /></Svg>;
+/** A box inside a box: a topic with an inner map. */
+export const InnerIcon = (p: P) => <Svg {...p}><rect x="3.5" y="3.5" width="17" height="17" rx="4" /><rect x="9" y="9" width="6" height="6" rx="1.5" /></Svg>;
+export const ExitInnerIcon = (p: P) => <Svg {...p}><rect x="3.5" y="3.5" width="17" height="17" rx="4" /><path d="M14 10l-5 5M9 10.5V15h4.5" /></Svg>;
+export const MergeIcon = (p: P) => <Svg {...p}><path d="M4 6h5c3 0 4 6 7 6h4M4 18h5c3 0 4-6 7-6" /><path d="M17 9l3 3-3 3" /></Svg>;
 export const RelationIcon = (p: P) => <Svg {...p}><path d="M4 19C4 8 20 16 20 5" /><path d="M16.5 4.5L20 5l.5 3.5" /></Svg>;
 export const FloatingIcon = (p: P) => <Svg {...p}><rect x="3" y="4" width="9" height="6" rx="2" /><rect x="12" y="14" width="9" height="6" rx="2" strokeDasharray="2.5 2" /></Svg>;
 export const Save = (p: P) => <Svg {...p}><path d="M5 4h11l3 3v13H5z" /><path d="M8 4v5h7V4M8 20v-6h8v6" /></Svg>;
@@ -114,3 +120,10 @@ export const Folder = ({ size }: P) => (
     <path d="M4 7h6l2 2h8v10H4z" />
   </Svg>
 );
+export const Copy = (p: P) => <Svg {...p}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></Svg>;
+export const Cut = (p: P) => <Svg {...p}><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8 16.5L18 4M16 16.5L6 4" /></Svg>;
+export const Paste = (p: P) => <Svg {...p}><path d="M9 4h6v3H9z" /><path d="M15 5h3v16H6V5h3" /><path d="M9 12h6M9 16h4" /></Svg>;
+export const Pencil = (p: P) => <Svg {...p}><path d="M4 20l1-4L16 5l3 3L8 19z" /><path d="M14 7l3 3" /></Svg>;
+export const LinkIcon = (p: P) => <Svg {...p}><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></Svg>;
+export const ShapeIcon = (p: P) => <Svg {...p}><rect x="3" y="7" width="12" height="10" rx="3" /><circle cx="17" cy="9" r="4" /></Svg>;
+export const RootIcon = (p: P) => <Svg {...p}><rect x="8" y="9" width="8" height="6" rx="2" /><path d="M12 9V4M12 20v-5M8 12H3M21 12h-5" /></Svg>;

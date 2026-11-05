@@ -151,7 +151,10 @@ export function writeBack(doc: MindMap, path: InnerPath, next: MindMap): MindMap
   const hostId = path.length && before.roots[0].id === path[path.length - 1] ? path[path.length - 1] : undefined;
   let roots: Topic[];
   let layout = doc.layout;
+  let title = next.title;
   if (hostId) {
+    // Edits inside follow the inner main topic's text into the title: not ours.
+    title = doc.title;
     const prev = old.get(hostId)!;
     const [main, ...extra] = next.roots;
     const top = rebuild(main, true);
@@ -171,7 +174,7 @@ export function writeBack(doc: MindMap, path: InnerPath, next: MindMap): MindMap
     ...doc.relations.filter((r) => !(shownBefore.has(r.from) && shownBefore.has(r.to))),
     ...next.relations,
   ].filter((r) => live.has(r.from) && live.has(r.to));
-  return { ...next, layout, roots, relations };
+  return { ...next, title, layout, roots, relations };
 }
 
 /** Topic ids to enter, outermost first, to see `id` (empty when it is on the outer map). */

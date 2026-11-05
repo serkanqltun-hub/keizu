@@ -173,7 +173,7 @@ Açık kayıt yoktur; hesaplar yalnız davetle açılır.
 
 - **Davet:** Panel (`https://keizu.alanadin.com/panel/`) → *Kullanıcılar* → kime olduğunu not et, isteğe bağlı kota ver → **Davet linki oluştur**. Linki kişiye gönder; kullanıcı adını ve şifresini kendisi seçer. Link 7 gün geçerlidir ve tek kullanımlıktır. Kullanılmamış davetleri aynı yerden iptal edebilirsin.
 - **Şifre sıfırlama:** Kullanıcının satırında **Sıfırlama linki**. Yeni şifreyi kullanıcı kendisi belirler; ardından tüm cihazlarının oturumu kapanır.
-- **Gizlilik:** Her kullanıcının haritaları ayrıdır. Yönetici dahil kimse başkasının haritasını uygulamada göremez. Harita paylaşımı ve ortak çalışma sonraki sürümde gelecek.
+- **Gizlilik:** Her kullanıcının haritaları ayrıdır. Yönetici dahil kimse başkasının haritasını uygulamada göremez. Bir haritayı birine göstermek için haritada **Paylaş** → kullanıcı adı → *görüntüleme* veya *düzenleme* yetkisi. Paylaşım harita harita ve kişi kişidir; kütüphanenin tamamı asla paylaşılmaz. Aynı haritayı açan herkes değişiklikleri canlı görür (bunun için ters vekilde `/api/v1/live` WebSocket bloğu gerekir, bkz. [bölüm 4](#4-sunucunda-zaten-nginx-varsa)).
 - **Cihazlar:** Herkes kendi panelinde bağlı cihazlarını görür ve kaybolan bir cihazın erişimini kaldırabilir.
 
 Aynı işler komut satırından:

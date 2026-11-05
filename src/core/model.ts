@@ -6,10 +6,10 @@
 // relations, which are labelled links between any two topics. How a tree is
 // drawn (mind map, logic chart, org chart) is a view setting, not data.
 
-export type LayoutKind = 'mindmap' | 'logic' | 'org' | 'concept' | 'timeline' | 'fishbone' | 'matrix';
+export type LayoutKind = 'mindmap' | 'logic' | 'org' | 'concept' | 'timeline' | 'fishbone' | 'matrix' | 'flow';
 
 /** Every layout, in the order the app offers them. */
-export const LAYOUT_KINDS: LayoutKind[] = ['mindmap', 'logic', 'org', 'concept', 'timeline', 'fishbone', 'matrix'];
+export const LAYOUT_KINDS: LayoutKind[] = ['mindmap', 'logic', 'org', 'concept', 'timeline', 'fishbone', 'matrix', 'flow'];
 export type TopicShape = 'rounded' | 'pill' | 'rect' | 'underline' | 'none';
 export type BranchStyle = 'curve' | 'elbow' | 'straight';
 
@@ -81,6 +81,12 @@ export interface Relation {
   from: string;
   to: string;
   label?: string;
+  /**
+   * 'flow': a step of a flow chart, so `to` gets one more way in (paths
+   * merging). Drawn as a solid arrow in flow charts. Plain relations are
+   * dashed annotations.
+   */
+  kind?: 'flow';
 }
 
 export interface MindMap {
@@ -93,6 +99,11 @@ export interface MindMap {
   layout: LayoutKind;
   branchStyle: BranchStyle;
   multicolor: boolean;
+  /**
+   * Notebook mode: every topic with a note shows its full note inside the
+   * topic, as a card. A view setting, saved with the map.
+   */
+  notebook?: boolean;
   /** roots[0] is the main topic; any others float on the canvas. */
   roots: Topic[];
   relations: Relation[];
@@ -279,9 +290,29 @@ function dropRelations(map: MindMap, removed: Set<string>): Relation[] {
   return map.relations.filter((r) => !removed.has(r.from) && !removed.has(r.to));
 }
 
+/**
+ * Flow charts: a step inside the branch being removed that another path
+ * still leads to (a flow link from outside) is kept. It moves under that
+ * path, and the link becomes its ordinary connector.
+ */
+function keepMergedSteps(map: MindMap, id: string): MindMap {
+  for (let guard = 0; guard < 1000; guard++) {
+    const node = findTopic(map, id);
+    if (!node) return map;
+    const inside = collectIds(node);
+    const link = map.relations.find((r) => r.kind === 'flow' && r.to !== id && inside.has(r.to) && !inside.has(r.from));
+    if (!link) return map;
+    const moved = moveTopic({ ...map, relations: map.relations.filter((r) => r.id !== link.id) }, link.to, link.from);
+    if (findParent(moved, link.to)?.id !== link.from) return map;
+    map = moved;
+  }
+  return map;
+}
+
 /** Removes a topic and its subtree. Returns the id that should be selected next. */
 export function removeTopic(map: MindMap, id: string): { map: MindMap; nextId: string } {
   if (map.roots[0]?.id === id) return { map, nextId: id }; // the main topic stays
+  map = keepMergedSteps(map, id);
   const node = findTopic(map, id);
   if (!node) return { map, nextId: map.roots[0].id };
   const removed = collectIds(node);
@@ -336,8 +367,10 @@ export function toggleCollapse(map: MindMap, id: string): MindMap {
   return updateTopic(map, id, { collapsed: !t.collapsed });
 }
 
-export function setMapProps(map: MindMap, patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'title'>>): MindMap {
-  return { ...map, ...patch, updatedAt: new Date().toISOString() };
+export function setMapProps(map: MindMap, patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'title' | 'notebook'>>): MindMap {
+  const next = { ...map, ...patch, updatedAt: new Date().toISOString() };
+  if (!next.notebook) delete next.notebook;
+  return next;
 }
 
 /** Sets or clears (undefined) the layout of a topic's branch. */
@@ -436,6 +469,21 @@ export function addRelation(map: MindMap, from: string, to: string, label?: stri
   return { map: touch({ ...map, relations: [...map.relations, { id, from, to, label }] }), id };
 }
 
+/**
+ * Flow charts: the path ending at `from` continues to `to`, which may
+ * already be reached another way (paths merge). No-op when `to` already
+ * follows `from`.
+ */
+export function addFlowLink(map: MindMap, from: string, to: string, label?: string): { map: MindMap; id: string } {
+  if (from === to || !findTopic(map, from) || !findTopic(map, to)) return { map, id: '' };
+  if (findParent(map, to)?.id === from) return { map, id: '' };
+  if (map.relations.some((r) => r.kind === 'flow' && r.from === from && r.to === to)) return { map, id: '' };
+  const id = newId('r');
+  const rel: Relation = { id, from, to, kind: 'flow' };
+  if (label) rel.label = label;
+  return { map: touch({ ...map, relations: [...map.relations, rel] }), id };
+}
+
 export function updateRelation(map: MindMap, id: string, patch: Partial<Omit<Relation, 'id'>>): MindMap {
   return touch({ ...map, relations: map.relations.map((r) => (r.id === id ? { ...r, ...patch } : r)) });
 }
@@ -454,6 +502,12 @@ export function cloneWithNewIds(t: Topic): Topic {
 export function pasteTopic(map: MindMap, parentId: string, topic: Topic): { map: MindMap; id: string } {
   const copy = cloneWithNewIds(topic);
   return { map: mapTopic(map, parentId, (p) => ({ ...p, collapsed: false, children: [...p.children, copy] })), id: copy.id };
+}
+
+/** Pastes a copy as a new free-floating tree at a canvas position. */
+export function pasteFloating(map: MindMap, pos: Point, topic: Topic): { map: MindMap; id: string } {
+  const copy: Topic = { ...cloneWithNewIds(topic), pos };
+  return { map: touch({ ...map, roots: [...map.roots, copy] }), id: copy.id };
 }
 
 // ---------- validation ----------

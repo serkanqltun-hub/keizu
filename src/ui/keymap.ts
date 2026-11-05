@@ -8,6 +8,7 @@ export const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(
 
 export type CommandId =
   | 'palette'
+  | 'contextMenu'
   | 'addChild'
   | 'addSibling'
   | 'addSiblingBefore'
@@ -28,11 +29,13 @@ export type CommandId =
   | 'navUp'
   | 'navDown'
   | 'relation'
+  | 'merge'
   | 'floating'
   | 'note'
   | 'save'
   | 'saveAs'
   | 'toggleOutline'
+  | 'notebook'
   | 'zoomIn'
   | 'zoomOut'
   | 'fit'
@@ -45,12 +48,17 @@ export type CommandId =
   | 'present'
   | 'openLink'
   | 'share'
+  | 'selectAll'
+  | 'formatPainter'
+  | 'copyStyle'
+  | 'pasteStyle'
   | 'enterInner'
   | 'exitInner'
   | 'branchToInner'
   | 'innerToBranch'
   | 'addInner'
   | 'insertMap';
+
 
 export interface CommandDef {
   id: CommandId;
@@ -64,6 +72,7 @@ export interface CommandDef {
 export const COMMANDS: CommandDef[] = [
   { id: 'palette', keys: ['Mod+K'], group: 'general' },
   { id: 'shortcuts', keys: ['?'], group: 'general' },
+  { id: 'contextMenu', keys: ['Shift+F10', 'ContextMenu'], group: 'general' },
   { id: 'language', keys: [], group: 'general' },
   { id: 'back', keys: [], group: 'general' },
   { id: 'addChild', keys: ['Tab', 'Insert'], group: 'edit' },
@@ -76,11 +85,17 @@ export const COMMANDS: CommandDef[] = [
   { id: 'copy', keys: ['Mod+C'], group: 'edit' },
   { id: 'cut', keys: ['Mod+X'], group: 'edit' },
   { id: 'paste', keys: ['Mod+V'], group: 'edit' },
+  { id: 'selectAll', keys: ['Mod+A'], group: 'edit' },
+  { id: 'formatPainter', keys: [], group: 'edit' },
+  { id: 'copyStyle', keys: ['Mod+Alt+C'], group: 'edit' },
+  { id: 'pasteStyle', keys: ['Mod+Alt+V'], group: 'edit' },
   { id: 'moveUp', keys: ['Alt+ArrowUp'], group: 'edit' },
   { id: 'moveDown', keys: ['Alt+ArrowDown'], group: 'edit' },
   { id: 'indent', keys: ['Tab'], outlineOnly: true, group: 'edit' },
   { id: 'outdent', keys: ['Shift+Tab'], outlineOnly: true, group: 'edit' },
   { id: 'relation', keys: [], group: 'edit' },
+  // Ctrl+Tab belongs to the browser (switching tabs): Alt+B works everywhere.
+  { id: 'merge', keys: ['Mod+Tab', 'Alt+B'], group: 'edit' },
   { id: 'floating', keys: [], group: 'edit' },
   { id: 'note', keys: ['F4'], group: 'edit' },
   { id: 'navLeft', keys: ['ArrowLeft'], group: 'navigate' },
@@ -90,6 +105,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'collapse', keys: ['Mod+/'], group: 'navigate' },
   { id: 'centerSelected', keys: ['Mod+Enter'], group: 'navigate' },
   { id: 'toggleOutline', keys: ['Mod+Alt+O'], group: 'view' },
+  { id: 'notebook', keys: ['Mod+Alt+N'], group: 'view' },
   { id: 'zoomIn', keys: ['Mod+=', 'Mod++'], group: 'view' },
   { id: 'zoomOut', keys: ['Mod+-'], group: 'view' },
   { id: 'fit', keys: ['Mod+0'], group: 'view' },
@@ -148,6 +164,7 @@ export function comboParts(combo: string): string[] {
 }
 
 const KEY_NAMES: Record<string, string> = {
+  ContextMenu: 'Menu',
   ArrowLeft: '←',
   ArrowRight: '→',
   ArrowUp: '↑',
