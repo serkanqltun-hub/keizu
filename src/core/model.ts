@@ -59,6 +59,33 @@ export interface Topic {
   collapsed?: boolean;
   style?: TopicStyle;
   children: Topic[];
+  /** Outlines drawn around runs of this topic's children. */
+  boundaries?: Boundary[];
+  /** Summary topics, each bracketing a run of this topic's children. */
+  summaries?: Summary[];
+}
+
+/**
+ * A run of sibling topics, from `from` to `to` (child ids of the owner,
+ * either order; the same id for a single branch).
+ */
+export interface ChildRange {
+  from: string;
+  to: string;
+}
+
+/** A labelled outline around a run of sibling branches. */
+export interface Boundary extends ChildRange {
+  id: string;
+  label?: string;
+  /** Outline colour; the first branch's colour when unset. */
+  color?: string;
+}
+
+/** A bracket over a run of sibling branches, with a topic that sums them up. */
+export interface Summary extends ChildRange {
+  /** Has no children of its own. */
+  topic: Topic;
 }
 
 export interface Relation {
@@ -147,6 +174,7 @@ function findIn(t: Topic, id: string): Topic | undefined {
     const hit = findIn(c, id);
     if (hit) return hit;
   }
+  if (t.summaries) for (const s of t.summaries) if (s.topic.id === id) return s.topic;
   return undefined;
 }
 
@@ -187,6 +215,34 @@ export function isDescendant(map: MindMap, ancestorId: string, id: string): bool
   return !!anc && anc.id !== id && !!findIn(anc, id);
 }
 
+/** The topic whose summary `id` is, with that summary; undefined for ordinary topics. */
+export function summaryOwner(map: MindMap, id: string): { owner: Topic; summary: Summary } | undefined {
+  const walk = (t: Topic): { owner: Topic; summary: Summary } | undefined => {
+    const s = t.summaries?.find((x) => x.topic.id === id);
+    if (s) return { owner: t, summary: s };
+    for (const c of t.children) {
+      const hit = walk(c);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  for (const r of map.roots) {
+    const hit = walk(r);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+export const isSummaryTopic = (map: MindMap, id: string) => !!summaryOwner(map, id);
+
+/** Child indices a range covers in its owner, lowest first; undefined if an end is gone. */
+export function rangeIndices(owner: Topic, r: ChildRange): [number, number] | undefined {
+  const a = owner.children.findIndex((c) => c.id === r.from);
+  const b = owner.children.findIndex((c) => c.id === r.to);
+  if (a < 0 || b < 0) return undefined;
+  return a <= b ? [a, b] : [b, a];
+}
+
 export function countTopics(t: Topic): number {
   return 1 + t.children.reduce((n, c) => n + countTopics(c), 0);
 }
@@ -198,6 +254,7 @@ export function countAll(map: MindMap): number {
 function collectIds(t: Topic, out = new Set<string>()): Set<string> {
   out.add(t.id);
   t.children.forEach((c) => collectIds(c, out));
+  t.summaries?.forEach((s) => out.add(s.topic.id));
   return out;
 }
 
@@ -211,7 +268,15 @@ function mapTree(t: Topic, id: string, fn: (t: Topic) => Topic): Topic {
     if (n !== c) changed = true;
     return n;
   });
-  return changed ? { ...t, children } : t;
+  if (changed) return { ...t, children };
+  // Summary topics are edited like any other topic.
+  const si = t.summaries?.findIndex((s) => s.topic.id === id) ?? -1;
+  if (si >= 0) {
+    const summaries = [...t.summaries!];
+    summaries[si] = { ...summaries[si], topic: { ...fn(summaries[si].topic), children: [] } };
+    return { ...t, summaries };
+  }
+  return t;
 }
 
 /** Applies `fn` to topic `id` wherever it lives. */
@@ -248,6 +313,7 @@ export function toggleMarker(map: MindMap, id: string, marker: string): MindMap 
 }
 
 export function addChild(map: MindMap, parentId: string, text = 'Alt konu'): { map: MindMap; id: string } {
+  if (isSummaryTopic(map, parentId)) return { map, id: parentId }; // summaries have no branches
   const child = createTopic(text);
   return { map: mapTopic(map, parentId, (t) => ({ ...t, collapsed: false, children: [...t.children, child] })), id: child.id };
 }
@@ -297,6 +363,11 @@ function keepMergedSteps(map: MindMap, id: string): MindMap {
 /** Removes a topic and its subtree. Returns the id that should be selected next. */
 export function removeTopic(map: MindMap, id: string): { map: MindMap; nextId: string } {
   if (map.roots[0]?.id === id) return { map, nextId: id }; // the main topic stays
+  const sum = summaryOwner(map, id);
+  if (sum) {
+    const next = removeSummary(map, id);
+    return { map: { ...next, relations: dropRelations(next, new Set([id])) }, nextId: sum.summary.to };
+  }
   map = keepMergedSteps(map, id);
   const node = findTopic(map, id);
   if (!node) return { map, nextId: map.roots[0].id };
@@ -309,8 +380,28 @@ export function removeTopic(map: MindMap, id: string): { map: MindMap; nextId: s
   const i = parent.children.findIndex((c) => c.id === id);
   const rest = parent.children.filter((c) => c.id !== id);
   const nextId = rest[Math.min(i, rest.length - 1)]?.id ?? parent.id;
-  const next = mapTopic(map, parent.id, (p) => ({ ...p, children: rest }));
+  const next = mapTopic(map, parent.id, (p) => ({ ...withoutChild(p, id), children: rest }));
   return { map: { ...next, relations: dropRelations(next, removed) }, nextId };
+}
+
+/**
+ * Boundaries and summaries of `p` with child `id` taken out of their runs:
+ * a run that ends at it shrinks by one, a run of just that child goes.
+ */
+function withoutChild(p: Topic, id: string): Topic {
+  if (!p.boundaries?.length && !p.summaries?.length) return p;
+  const i = p.children.findIndex((c) => c.id === id);
+  const fix = <R extends ChildRange>(r: R): R | undefined => {
+    if (r.from !== id && r.to !== id) return r;
+    const ix = rangeIndices(p, r);
+    if (!ix || ix[0] === ix[1]) return undefined;
+    const [lo, hi] = ix;
+    const nlo = i === lo ? lo + 1 : lo, nhi = i === hi ? hi - 1 : hi;
+    return { ...r, from: p.children[nlo].id, to: p.children[nhi].id };
+  };
+  const boundaries = p.boundaries?.map(fix).filter((b): b is Boundary => !!b);
+  const summaries = p.summaries?.map(fix).filter((s): s is Summary => !!s);
+  return { ...p, boundaries: boundaries?.length ? boundaries : undefined, summaries: summaries?.length ? summaries : undefined };
 }
 
 /** Takes a topic out of the tree; returns the map without it and the topic. */
@@ -319,13 +410,22 @@ function detach(map: MindMap, id: string): { map: MindMap; node: Topic } | undef
   if (!node) return undefined;
   if (isRoot(map, id)) return { map: { ...map, roots: map.roots.filter((r) => r.id !== id) }, node };
   const parent = findParent(map, id)!;
-  return { map: mapTopic(map, parent.id, (p) => ({ ...p, children: p.children.filter((c) => c.id !== id) })), node };
+  return { map: mapTopic(map, parent.id, (p) => ({ ...withoutChild(p, id), children: p.children.filter((c) => c.id !== id) })), node };
 }
 
 /** Moves `id` under `newParentId` at `index` (end when omitted). No-op on invalid moves. */
 export function moveTopic(map: MindMap, id: string, newParentId: string, index?: number): MindMap {
   if (id === map.roots[0]?.id || id === newParentId) return map;
   if (isDescendant(map, id, newParentId) || !findTopic(map, newParentId)) return map;
+  if (isSummaryTopic(map, id) || isSummaryTopic(map, newParentId)) return map;
+  const s = siblingsOf(map, id);
+  if (s?.parent?.id === newParentId && index !== undefined) {
+    // A move among siblings keeps the topic inside the runs it belongs to.
+    const children = [...s.parent.children];
+    const [node] = children.splice(s.index, 1);
+    children.splice(Math.max(0, Math.min(index, children.length)), 0, node);
+    return mapTopic(map, newParentId, (p) => ({ ...p, collapsed: false, children }));
+  }
   const d = detach(map, id);
   if (!d) return map;
   const node: Topic = { ...d.node, pos: undefined };
@@ -339,7 +439,7 @@ export function moveTopic(map: MindMap, id: string, newParentId: string, index?:
 
 /** Turns a topic into a free-floating root at `pos`, or moves an existing one. */
 export function floatTopic(map: MindMap, id: string, pos: Point): MindMap {
-  if (id === map.roots[0]?.id) return map;
+  if (id === map.roots[0]?.id || isSummaryTopic(map, id)) return map;
   if (isRoot(map, id)) return mapTopic(map, id, (t) => ({ ...t, pos }));
   const d = detach(map, id);
   if (!d) return map;
@@ -404,6 +504,7 @@ export function revealTopic(map: MindMap, id: string): MindMap {
   const walk = (t: Topic): boolean => {
     if (t.id === id) return true;
     path.push(t);
+    if (t.summaries?.some((s) => s.topic.id === id)) return true;
     for (const c of t.children) if (walk(c)) return true;
     path.pop();
     return false;
@@ -437,6 +538,7 @@ export function pruneResources(map: MindMap): MindMap {
   const walk = (t: Topic) => {
     if (t.image) used.add(t.image.res);
     t.children.forEach(walk);
+    t.summaries?.forEach((s) => walk(s.topic));
   };
   map.roots.forEach(walk);
   const keys = Object.keys(map.resources);
@@ -477,14 +579,135 @@ export function removeRelation(map: MindMap, id: string): MindMap {
   return touch({ ...map, relations: map.relations.filter((r) => r.id !== id) });
 }
 
+// ---------- boundaries and summaries ----------
+
+/**
+ * The owner and run for a set of sibling topics (one topic is a run of one).
+ * Undefined for roots, summary topics or topics with different parents.
+ */
+export function siblingRun(map: MindMap, ids: string[]): { owner: Topic; range: ChildRange } | undefined {
+  if (!ids.length) return undefined;
+  const owner = findParent(map, ids[0]);
+  if (!owner || ids.some((id) => findParent(map, id)?.id !== owner.id)) return undefined;
+  const idx = ids.map((id) => owner.children.findIndex((c) => c.id === id)).sort((a, b) => a - b);
+  return { owner, range: { from: owner.children[idx[0]].id, to: owner.children[idx[idx.length - 1]].id } };
+}
+
+/** Puts an outline around sibling topics. Returns the boundary id ('' when not possible). */
+export function addBoundary(map: MindMap, ids: string[], label?: string): { map: MindMap; id: string } {
+  const run = siblingRun(map, ids);
+  if (!run) return { map, id: '' };
+  const id = newId('b');
+  const b: Boundary = { id, ...run.range, ...(label ? { label } : {}) };
+  return { map: mapTopic(map, run.owner.id, (t) => ({ ...t, boundaries: [...(t.boundaries ?? []), b] })), id };
+}
+
+/** The topic owning boundary `id`, with the boundary. */
+export function findBoundary(map: MindMap, id: string): { owner: Topic; boundary: Boundary } | undefined {
+  const walk = (t: Topic): { owner: Topic; boundary: Boundary } | undefined => {
+    const b = t.boundaries?.find((x) => x.id === id);
+    if (b) return { owner: t, boundary: b };
+    for (const c of t.children) {
+      const hit = walk(c);
+      if (hit) return hit;
+    }
+    return undefined;
+  };
+  for (const r of map.roots) {
+    const hit = walk(r);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+export function updateBoundary(map: MindMap, id: string, patch: Partial<Pick<Boundary, 'label' | 'color'>>): MindMap {
+  const f = findBoundary(map, id);
+  if (!f) return map;
+  return mapTopic(map, f.owner.id, (t) => ({
+    ...t,
+    boundaries: t.boundaries!.map((b) => {
+      if (b.id !== id) return b;
+      const n: Boundary = { ...b, ...patch };
+      if (!n.label) delete n.label;
+      if (!n.color) delete n.color;
+      return n;
+    }),
+  }));
+}
+
+export function removeBoundary(map: MindMap, id: string): MindMap {
+  const f = findBoundary(map, id);
+  if (!f) return map;
+  return mapTopic(map, f.owner.id, (t) => {
+    const boundaries = t.boundaries!.filter((b) => b.id !== id);
+    return { ...t, boundaries: boundaries.length ? boundaries : undefined };
+  });
+}
+
+/**
+ * Grows or shrinks a run by one sibling at one end: `end` 'start' or 'end'
+ * (in child order), `delta` +1 grows outward, -1 shrinks. A run never
+ * shrinks below one topic.
+ */
+function resizeRange<R extends ChildRange>(owner: Topic, r: R, end: 'start' | 'end', delta: 1 | -1): R {
+  const ix = rangeIndices(owner, r);
+  if (!ix) return r;
+  let [lo, hi] = ix;
+  if (end === 'start') lo = Math.max(0, Math.min(hi, lo - delta));
+  else hi = Math.min(owner.children.length - 1, Math.max(lo, hi + delta));
+  return { ...r, from: owner.children[lo].id, to: owner.children[hi].id };
+}
+
+export function resizeBoundary(map: MindMap, id: string, end: 'start' | 'end', delta: 1 | -1): MindMap {
+  const f = findBoundary(map, id);
+  if (!f) return map;
+  const next = resizeRange(f.owner, f.boundary, end, delta);
+  if (next.from === f.boundary.from && next.to === f.boundary.to) return map;
+  return mapTopic(map, f.owner.id, (t) => ({ ...t, boundaries: t.boundaries!.map((b) => (b.id === id ? next : b)) }));
+}
+
+/** Adds a summary over sibling topics. Returns the new summary topic's id ('' when not possible). */
+export function addSummary(map: MindMap, ids: string[], text = 'Özet'): { map: MindMap; id: string } {
+  const run = siblingRun(map, ids);
+  if (!run) return { map, id: '' };
+  const topic = createTopic(text);
+  const s: Summary = { ...run.range, topic };
+  return { map: mapTopic(map, run.owner.id, (t) => ({ ...t, summaries: [...(t.summaries ?? []), s] })), id: topic.id };
+}
+
+/** Removes the summary whose topic is `topicId`. */
+export function removeSummary(map: MindMap, topicId: string): MindMap {
+  const f = summaryOwner(map, topicId);
+  if (!f) return map;
+  return mapTopic(map, f.owner.id, (t) => {
+    const summaries = t.summaries!.filter((s) => s.topic.id !== topicId);
+    return { ...t, summaries: summaries.length ? summaries : undefined };
+  });
+}
+
+export function resizeSummary(map: MindMap, topicId: string, end: 'start' | 'end', delta: 1 | -1): MindMap {
+  const f = summaryOwner(map, topicId);
+  if (!f) return map;
+  const next = resizeRange(f.owner, f.summary, end, delta);
+  if (next.from === f.summary.from && next.to === f.summary.to) return map;
+  return mapTopic(map, f.owner.id, (t) => ({ ...t, summaries: t.summaries!.map((s) => (s.topic.id === topicId ? next : s)) }));
+}
+
 // ---------- clipboard ----------
 
 /** Deep copy with fresh ids, used for paste. */
 export function cloneWithNewIds(t: Topic): Topic {
-  return { ...t, id: newId(), pos: undefined, children: t.children.map(cloneWithNewIds) };
+  const children = t.children.map(cloneWithNewIds);
+  const ids = new Map(t.children.map((c, i) => [c.id, children[i].id]));
+  const remap = <R extends ChildRange>(r: R): R => ({ ...r, from: ids.get(r.from) ?? r.from, to: ids.get(r.to) ?? r.to });
+  const copy: Topic = { ...t, id: newId(), pos: undefined, children };
+  if (t.boundaries) copy.boundaries = t.boundaries.map((b) => ({ ...remap(b), id: newId('b') }));
+  if (t.summaries) copy.summaries = t.summaries.map((s) => ({ ...remap(s), topic: { ...s.topic, id: newId(), children: [] } }));
+  return copy;
 }
 
 export function pasteTopic(map: MindMap, parentId: string, topic: Topic): { map: MindMap; id: string } {
+  if (isSummaryTopic(map, parentId)) return { map, id: parentId };
   const copy = cloneWithNewIds(topic);
   return { map: mapTopic(map, parentId, (p) => ({ ...p, collapsed: false, children: [...p.children, copy] })), id: copy.id };
 }

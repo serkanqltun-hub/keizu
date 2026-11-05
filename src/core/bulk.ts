@@ -38,6 +38,7 @@ export function topLevel(map: MindMap, ids: Iterable<string>): string[] {
   const walk = (t: Topic) => {
     if (set.has(t.id)) return void out.push(t.id);
     t.children.forEach(walk);
+    for (const s of t.summaries ?? []) if (set.has(s.topic.id)) out.push(s.topic.id);
   };
   map.roots.forEach(walk);
   return out;

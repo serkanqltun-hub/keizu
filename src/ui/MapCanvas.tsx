@@ -45,10 +45,17 @@ interface Props {
   editingId: string | null;
   editSeed: string | null;
   selectedRelId: string | null;
+  selectedBoundaryId?: string | null;
+  /**
+   * Focus mode: the topic whose branch alone is shown (null for the whole
+   * map). Entering zooms to the branch; leaving returns to the earlier view.
+   */
+  scopeId?: string | null;
   /** When set, the next topic click picks the target of a new relation. */
   relationFrom: string | null;
   onSelect(id: string | null): void;
   onSelectRelation(id: string): void;
+  onSelectBoundary?(id: string): void;
   onPickRelationTarget(id: string): void;
   onFloat(id: string, pos: Point): void;
   onCreateFloating(pos: Point): void;
@@ -311,6 +318,20 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map.id, map.layout]);
 
+  // Focus mode: zoom to the focused branch, and back to the earlier view on leaving.
+  const scope = props.scopeId ?? null;
+  const lastScope = useRef(scope);
+  const viewBeforeFocus = useRef<View | null>(null);
+  useLayoutEffect(() => {
+    const prev = lastScope.current;
+    if (prev === scope) return;
+    lastScope.current = scope;
+    if (scope && !prev) viewBeforeFocus.current = cam.current.target ?? viewRef.current;
+    const v = scope ? fitView() : viewBeforeFocus.current ?? fitView();
+    if (!scope) viewBeforeFocus.current = null;
+    if (v) animateTo(v);
+  }, [scope, fitView, animateTo]);
+
   useEffect(() => props.onZoomChange(view.k), [view.k]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keep the selected topic on screen when navigating with the keyboard.
@@ -437,6 +458,11 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       props.onSelectRelation(relation.getAttribute('data-relation-id')!);
       return;
     }
+    const boundary = el.closest('[data-boundary-id]');
+    if (boundary && e.button === 0 && !topicId && props.onSelectBoundary) {
+      props.onSelectBoundary(boundary.getAttribute('data-boundary-id')!);
+      return;
+    }
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     if (topicId && e.button === 0) {
       const id = topicId;
@@ -479,7 +505,8 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       setBox((bx) => (bx ? { ...bx, x1: p.x, y1: p.y } : bx));
       return;
     }
-    if (g.id === map.roots[0].id || g.id === editingId || props.readOnly) return;
+    // The centre (main or focused topic) and summary topics stay where the layout puts them.
+    if (g.id === map.roots[0].id || g.id === layout.focusId || layout.byId.get(g.id)?.summaryOf || g.id === editingId || props.readOnly) return;
     if (!g.dragging && Math.hypot(e.clientX - g.sx, e.clientY - g.sy) < 5) return;
     g.dragging = true;
     const p = toMap(e.clientX, e.clientY);
@@ -487,7 +514,8 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     // Roots keep their grab offset; other topics are carried by the pointer.
     const root = isRoot(map, g.id);
     const x = root ? p.x - g.ox : p.x, y = root ? p.y - g.oy : p.y;
-    setDrag({ id: g.id, x, y, target: hitTest(p.x, p.y, exclude)?.id ?? null, shift: e.shiftKey, group: g.group });
+    const over = hitTest(p.x, p.y, exclude);
+    setDrag({ id: g.id, x, y, target: over && !over.summaryOf ? over.id : null, shift: e.shiftKey, group: g.group });
   };
 
   const onPointerUp = () => {
@@ -553,7 +581,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       props.onSelect(topicId);
       props.onOpenNote(topicId);
     } else if (topicId) props.onStartEdit(topicId);
-    else if (!(e.target as Element).closest('[data-relation-id]')) props.onCreateFloating(toMap(e.clientX, e.clientY));
+    else if (!(e.target as Element).closest('[data-relation-id], [data-boundary-id]')) props.onCreateFloating(toMap(e.clientX, e.clientY));
   };
 
   const drawn = useLayoutMotion(layout, map.id);
@@ -599,6 +627,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
             selectedId={editingId ? undefined : selectedId ?? undefined}
             selectedIds={editingId ? undefined : props.selectedIds}
             selectedRelId={props.selectedRelId ?? undefined}
+            selectedBoundaryId={props.selectedBoundaryId ?? undefined}
             dimIds={dragged ?? undefined}
             viewport={viewport}
             simple={simple}

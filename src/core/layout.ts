@@ -4,9 +4,9 @@
 
 import { layeredLayout, roundedPath, routePoints, type FlowEdgeIn, type FlowRoute } from './flow';
 import { MARKER_GAP, MARKER_SIZE } from './markers';
-import type { LayoutKind, MindMap, Point, Relation, Topic, TopicShape } from './model';
+import type { LayoutKind, MindMap, Point, Relation, Summary, Topic, TopicShape } from './model';
 export type { Point };
-import { countTopics } from './model';
+import { countTopics, findTopic, rangeIndices } from './model';
 import { getTheme } from './themes';
 
 export type Measure = (text: string, font: string) => number;
@@ -59,6 +59,31 @@ export interface NodeBox {
   imageH: number;
   /** The note, when it is shown inside the topic below the text. */
   noteBlock?: NoteBlock;
+  /** Set on summary topics: the topic whose children they sum up. */
+  summaryOf?: string;
+}
+
+/** An outline around a run of sibling branches. */
+export interface BoundaryBox {
+  id: string;
+  ownerId: string;
+  /** Every topic drawn inside it (the branches and all they show). */
+  members: string[];
+  label?: string;
+  color: string;
+}
+
+/** The bracket of a summary topic. */
+export interface BracketBox {
+  /** The summary topic's id. */
+  id: string;
+  ownerId: string;
+  members: string[];
+  /** 'h': the bracket stands beside the run, 'v': it lies below it. */
+  orient: 'h' | 'v';
+  /** Which side of the run the bracket is on ('h' only). */
+  dir: 1 | -1;
+  color: string;
 }
 
 /** A topic's note drawn inside its box, wrapped to fit. */
@@ -91,6 +116,50 @@ export interface MapLayout {
   bounds: { minX: number; minY: number; maxX: number; maxY: number };
   /** Arrows of flow charts (their tree connectors and flow links). */
   flowEdges: FlowEdge[];
+  boundaries: BoundaryBox[];
+  brackets: BracketBox[];
+  /** Set in focus mode: the topic whose branch alone is shown. */
+  focusId?: string;
+}
+
+/** Space between a boundary's outline and what it holds. */
+export const BOUNDARY_PAD = 10;
+/** Extra room at the top of a boundary for its label. */
+export const BOUNDARY_LABEL_H = 22;
+/** Width of a summary bracket, and the gap on either side of it. */
+export const BRACKET_W = 14;
+export const BRACKET_GAP = 8;
+
+/** Focus mode: show only one branch, drawn where it stands on the full map. */
+export interface FocusOptions {
+  id: string;
+  /** Where the focused topic's centre is drawn. */
+  anchor?: Point;
+  /** Colour for its branches (its own branch colour), so they keep their look. */
+  color?: string;
+}
+
+/**
+ * The map as seen in focus mode: the focused topic's branch as the only
+ * tree, laid out as it was on the full map. Undefined if the topic is gone.
+ */
+export function focusView(map: MindMap, id: string): MindMap | undefined {
+  const t = findTopic(map, id);
+  if (!t) return undefined;
+  let kind: LayoutKind | undefined;
+  const walk = (x: Topic, inherited: LayoutKind): boolean => {
+    const own = x.layout ?? inherited;
+    if (x.id === id) {
+      kind = own;
+      return true;
+    }
+    return x.children.some((c) => walk(c, own));
+  };
+  if (!map.roots.some((r) => walk(r, r.layout ?? map.layout))) return undefined; // a summary topic
+  // A mind-map branch keeps growing to one side, as it did on the full map,
+  // so its boundaries and summaries stay whole. Its own layout setting wins.
+  const own = t.layout ?? (kind === 'mindmap' && !map.roots.some((r) => r.id === id) ? 'logic' : kind!);
+  return { ...map, layout: own, roots: [{ ...t, pos: undefined, collapsed: undefined, layout: undefined }] };
 }
 
 export const FONT_FAMILY = "'Plus Jakarta Sans', system-ui, sans-serif";
@@ -231,12 +300,31 @@ export const FISH_SLANT = 0.45;
 /** Layouts that draw every topic in a box (no underline-only topics). */
 const BOXED: LayoutKind[] = ['org', 'concept', 'timeline', 'fishbone', 'matrix', 'flow'];
 
-export function layoutMap(map: MindMap, measure: Measure): MapLayout {
+export function layoutMap(map: MindMap, measure: Measure, focus?: FocusOptions): MapLayout {
+  if (focus) {
+    const view = focusView(map, focus.id);
+    if (view) {
+      const l = layoutWhole(view, measure, focus.color);
+      const dx = focus.anchor?.x ?? 0, dy = focus.anchor?.y ?? 0;
+      for (const b of l.nodes) {
+        b.x += dx;
+        b.y += dy;
+      }
+      const { minX, minY, maxX, maxY } = l.bounds;
+      return { ...l, bounds: { minX: minX + dx, minY: minY + dy, maxX: maxX + dx, maxY: maxY + dy }, focusId: focus.id };
+    }
+  }
+  return layoutWhole(map, measure);
+}
+
+function layoutWhole(map: MindMap, measure: Measure, branchColor?: string): MapLayout {
   const theme = getTheme(map.theme);
   const nodes: NodeBox[] = [];
   const byId = new Map<string, NodeBox>();
+  const boundaries: BoundaryBox[] = [];
+  const brackets: BracketBox[] = [];
   const mainKind = map.layout;
-  const palette = (i: number) => (map.multicolor ? theme.palette[i % theme.palette.length] : theme.mono);
+  const palette = (i: number) => branchColor ?? (map.multicolor ? theme.palette[i % theme.palette.length] : theme.mono);
   let colorIndex = map.roots[0]?.children.length ?? 0;
   let maxY = 0;
   const flowEdges: FlowEdge[] = [];
@@ -264,6 +352,8 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
       byId.set(b.id, b);
       maxY = Math.max(maxY, b.y + b.h / 2);
     }
+    boundaries.push(...tree.boundaries);
+    brackets.push(...tree.brackets);
   });
 
   const bounds = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
@@ -274,7 +364,14 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
     bounds.maxY = Math.max(bounds.maxY, b.y + b.h / 2);
   }
   if (!nodes.length) Object.assign(bounds, { minX: 0, minY: 0, maxX: 0, maxY: 0 });
-  return { kind: mainKind, nodes, byId, bounds, flowEdges };
+  // Room for the outlines of boundaries on the outside of the map.
+  if (boundaries.length) {
+    bounds.minX -= BOUNDARY_PAD;
+    bounds.maxX += BOUNDARY_PAD;
+    bounds.minY -= BOUNDARY_PAD + BOUNDARY_LABEL_H;
+    bounds.maxY += BOUNDARY_PAD;
+  }
+  return { kind: mainKind, nodes, byId, bounds, flowEdges, boundaries, brackets };
 }
 
 /** Extent of a laid-out subtree around its root's centre (all >= 0). */
@@ -302,10 +399,16 @@ function layoutTree(
   signature = false,
   notebook = false,
   links: Relation[] = [],
-): { nodes: NodeBox[]; root: NodeBox; minY: number; flowEdges: FlowEdge[] } {
+): { nodes: NodeBox[]; root: NodeBox; minY: number; flowEdges: FlowEdge[]; boundaries: BoundaryBox[]; brackets: BracketBox[] } {
   const flowEdges: FlowEdge[] = [];
   const nodes: NodeBox[] = [];
   const byId = new Map<string, NodeBox>();
+  /** Summaries to place, by owner id, with the child index run they cover. */
+  const summaryRuns = new Map<string, { s: Summary; lo: number; hi: number }[]>();
+  /** Boundaries each branch stands in (as one of the run), innermost owner first. */
+  const memberOf = new Map<string, { labelled: boolean; first: boolean; last: boolean }[]>();
+  const boundaryRuns: { id: string; owner: Topic; lo: number; hi: number; label?: string; color?: string }[] = [];
+  const bracketOut = new Map<string, Omit<BracketBox, 'members'> & { owner: Topic; lo: number; hi: number }>();
   /** Topics whose layout is set explicitly (the tree root counts). */
   const explicit = new Set<string>([root.id]);
 
@@ -317,8 +420,29 @@ function layoutTree(
     const box: NodeBox = { id: t.id, rootId: root.id, layout: own, flow: 'right', topic: t, parentId, depth, side: 0, x: 0, y: 0, color, hidden, ...size };
     nodes.push(box);
     byId.set(t.id, box);
-    if (!hidden) {
-      t.children.forEach((c, i) => build(c, depth + 1, depth === 0 ? palette(i) : color, own, BOXED.includes(own), t.id));
+    if (hidden) return;
+    t.children.forEach((c, i) => build(c, depth + 1, depth === 0 ? palette(i) : color, own, BOXED.includes(own), t.id));
+    // Flow charts lay out steps in columns of their own: no boundaries or summaries there.
+    if (own === 'flow') return;
+    for (const s of t.summaries ?? []) {
+      const ix = rangeIndices(t, s);
+      if (!ix) continue;
+      const st = s.topic;
+      const sColor = byId.get(t.children[ix[0]].id)?.color ?? color;
+      const sSize = sizeNode(st, depth + 1, signature || BOXED.includes(own), measure, resources, signature, notebook);
+      const sBox: NodeBox = { id: st.id, rootId: root.id, layout: own, flow: 'right', topic: st, parentId: t.id, depth: depth + 1, side: 0, x: 0, y: 0, color: sColor, hidden: 0, noEdge: true, summaryOf: t.id, ...sSize };
+      nodes.push(sBox);
+      byId.set(st.id, sBox);
+      summaryRuns.set(t.id, [...(summaryRuns.get(t.id) ?? []), { s, lo: ix[0], hi: ix[1] }]);
+    }
+    for (const bd of t.boundaries ?? []) {
+      const ix = rangeIndices(t, bd);
+      if (!ix) continue;
+      boundaryRuns.push({ id: bd.id, owner: t, lo: ix[0], hi: ix[1], label: bd.label, color: bd.color });
+      for (let k = ix[0]; k <= ix[1]; k++) {
+        const id = t.children[k].id;
+        memberOf.set(id, [...(memberOf.get(id) ?? []), { labelled: !!bd.label, first: k === ix[0], last: k === ix[1] }]);
+      }
     }
   };
   build(root, baseDepth, baseDepth === 0 ? mono : rootColor, kind, false);
@@ -395,8 +519,70 @@ function layoutTree(
     return e;
   };
 
-  /** Places the subtree of `t` (on `side` of its parent) and returns its extent. */
+  /** Extent of each placed subtree, boundary room included. */
+  const extOf = new Map<string, Ext>();
+
+  /**
+   * Places the subtree of `t` (on `side` of its parent) and returns its
+   * extent, with its summaries placed and room for the boundaries it is in.
+   */
   const arrange = (t: Topic, side: -1 | 0 | 1, given?: Flow): Ext => {
+    const e = arrangeOwn(t, side, given);
+    const b = byId.get(t.id)!;
+    for (const run of summaryRuns.get(t.id) ?? []) placeSummary(t, b, e, run);
+    const pads = memberOf.get(t.id);
+    if (pads) {
+      const pf = b.parentId ? byId.get(b.parentId)?.flow : undefined;
+      // Room only on the outside of the run: between its own branches the usual gap is enough.
+      const across = pf === 'down' || pf === 'timeline';
+      const stacked = !across && pf !== 'fishbone' && pf !== 'matrix';
+      // Left of a mind map and in upward lists the run is drawn bottom to top.
+      const flipped = (pf === 'both' && side === -1) || pf === 'treeUp';
+      for (const p of pads) {
+        const top = stacked ? (flipped ? p.last : p.first) : true;
+        const bottom = stacked ? (flipped ? p.first : p.last) : true;
+        e.l += !across || p.first ? BOUNDARY_PAD : 0;
+        e.r += !across || p.last ? BOUNDARY_PAD : 0;
+        e.b += bottom ? BOUNDARY_PAD : 0;
+        // Side by side every branch keeps the label's room, so they stay level.
+        e.t += top ? BOUNDARY_PAD + (p.labelled ? BOUNDARY_LABEL_H : 0) : 0;
+      }
+    }
+    extOf.set(t.id, e);
+    return e;
+  };
+
+  /** Puts a summary topic beside (or below) the run of children it sums up. */
+  const placeSummary = (t: Topic, b: NodeBox, e: Ext, run: { s: Summary; lo: number; hi: number }) => {
+    let l = Infinity, r = -Infinity, top = Infinity, bot = -Infinity;
+    for (let k = run.lo; k <= run.hi; k++) {
+      const c = t.children[k];
+      const o = off.get(c.id), ce = extOf.get(c.id);
+      if (!o || !ce) continue;
+      l = Math.min(l, o.x - ce.l);
+      r = Math.max(r, o.x + ce.r);
+      top = Math.min(top, o.y - ce.t);
+      bot = Math.max(bot, o.y + ce.b);
+    }
+    if (l === Infinity) return;
+    const st = run.s.topic;
+    const vertical = b.flow === 'down' || b.flow === 'timeline' || b.flow === 'matrix' || b.flow === 'fishbone';
+    const dir: 1 | -1 = vertical ? 1 : byId.get(t.children[run.lo].id)?.side === -1 ? -1 : 1;
+    const se = arrangeOwn(st, vertical ? 0 : dir);
+    const sb = byId.get(st.id)!;
+    sb.noEdge = true;
+    const reach = BRACKET_GAP * 2 + BRACKET_W;
+    const dx = vertical ? (l + r) / 2 : dir > 0 ? r + reach + se.l : l - reach - se.r;
+    const dy = vertical ? bot + reach + se.t : (top + bot) / 2;
+    off.set(st.id, { x: dx, y: dy });
+    e.l = Math.max(e.l, se.l - dx);
+    e.r = Math.max(e.r, dx + se.r);
+    e.t = Math.max(e.t, se.t - dy);
+    e.b = Math.max(e.b, dy + se.b);
+    bracketOut.set(st.id, { id: st.id, ownerId: t.id, orient: vertical ? 'v' : 'h', dir, color: sb.color, owner: t, lo: run.lo, hi: run.hi });
+  };
+
+  const arrangeOwn = (t: Topic, side: -1 | 0 | 1, given?: Flow): Ext => {
     const b = byId.get(t.id)!;
     b.side = side;
     b.flow = flowOf(b, side, given);
@@ -561,10 +747,37 @@ function layoutTree(
       const o = off.get(c.id)!;
       place(c, x + o.x, y + o.y);
     }
+    if (b.hidden) return;
+    for (const s of t.summaries ?? []) {
+      const o = off.get(s.topic.id);
+      const sb = byId.get(s.topic.id);
+      if (o && sb) {
+        sb.x = x + o.x;
+        sb.y = y + o.y;
+      }
+    }
   };
   place(root, 0, 0);
+
+  /** Ids of every topic drawn for the children lo..hi of `owner`. */
+  const shownIn = (owner: Topic, lo: number, hi: number) => {
+    const out: string[] = [];
+    const walk = (t: Topic) => {
+      if (!byId.has(t.id)) return;
+      out.push(t.id);
+      if (byId.get(t.id)!.hidden) return;
+      t.children.forEach(walk);
+      t.summaries?.forEach((s) => byId.has(s.topic.id) && out.push(s.topic.id));
+    };
+    for (let k = lo; k <= hi; k++) walk(owner.children[k]);
+    return out;
+  };
+  const boundaries: BoundaryBox[] = boundaryRuns
+    .map((r) => ({ id: r.id, ownerId: r.owner.id, members: shownIn(r.owner, r.lo, r.hi), label: r.label, color: r.color ?? byId.get(r.owner.children[r.lo].id)?.color ?? mono }))
+    .filter((x) => x.members.length);
+  const brackets: BracketBox[] = [...bracketOut.values()].map(({ owner, lo, hi, ...rest }) => ({ ...rest, members: shownIn(owner, lo, hi) }));
   const minY = nodes.reduce((m, b) => Math.min(m, b.y - b.h / 2), 0);
-  return { nodes, root: byId.get(root.id)!, minY, flowEdges };
+  return { nodes, root: byId.get(root.id)!, minY, flowEdges, boundaries, brackets };
 }
 
 /** Rough measurer for tests and non-browser contexts. */

@@ -29,6 +29,8 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 - 4 tema (Taze, Gece, Kâğıt, Sade), dal stilleri (eğri, dirsek, düz), konu şekli ve rengi
 - İşaretler (öncelik, ilerleme, bayrak, simge) ve konu notları: konunun yanında açılan not kartı (F4 ya da konudaki not simgesine tıkla), istenirse not konunun içinde görünür; Markdown ve OPML dışa/içe aktarmada notlar korunur, sunumda o konunun notu altta çıkar
 - Konulara görsel ekleme (PNG, JPEG, GIF, WebP)
+- Odak modu (F6): bir dalın içine gir, haritada yalnız o dal kalsın; üstteki yol çubuğundan üst dallara dön, Esc ile çık
+- Sınır ve özet: kardeş dalları etiketli bir çerçeveyle grupla (Ctrl/⌘ + Shift + B) ya da parantezle toplayan bir özet konusu ekle (Ctrl/⌘ + Shift + G); kapsam panelden büyütülüp küçültülür, `.keizu` dosyasında saklanır, XMind'den içe aktarılır
 - `.keizu` dosyası: harita JSON'u ve görselleri tek bir pakette; istersen git dostu düz JSON
 - Masaüstünde gerçek dosyalar: Kaydet ile bir dosya seç, değişiklikler o dosyaya otomatik yazılır; `.keizu` dosyasına çift tıklayınca Keizu'da açılır
 - Web'de **Bilgisayara kaydet**: Chrome ve Edge'de dosya bağlı kalır ve otomatik güncellenir, diğer tarayıcılarda indirilir
@@ -63,8 +65,11 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 | Enter / Shift+Enter | Kardeş konu ekle (sonrasına / öncesine) |
 | F2, Boşluk veya yazmaya başla | Metni düzenle (Shift+Enter yeni satır) |
 | F5 | Sunum modu |
+| F6 | Odak modu: seçili dala odaklan (Esc ile çık) |
+| Ctrl/⌘ + Shift + B | Sınır ekle |
+| Ctrl/⌘ + Shift + G | Özet ekle |
 | Alt + Enter | Konudaki bağlantıyı aç |
-| Delete | Konuyu veya seçili ilişkiyi sil |
+| Delete | Konuyu, seçili ilişkiyi ya da sınırı sil |
 | Ok tuşları | Konular arasında gezin |
 | Ctrl/⌘ + / | Daralt / genişlet |
 | Ctrl/⌘ + Z, Ctrl/⌘ + Shift + Z | Geri al, yinele |

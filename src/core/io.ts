@@ -1,6 +1,6 @@
 // Import / export of formats that don't need a browser.
 
-import { createTopic, isMindMap, newId, normalizeMap, type MindMap, type Topic } from './model';
+import { createTopic, isMindMap, newId, normalizeMap, rangeIndices, type MindMap, type Topic } from './model';
 import { child, childrenNamed, escapeXml, parseXml, type XmlNode } from './xml';
 
 export function toJSON(map: MindMap): string {
@@ -29,14 +29,26 @@ export function toMarkdown(map: MindMap): string {
     const pad = '  '.repeat(depth);
     out.push(`${pad}- ${t.text.replace(/\n/g, ' ')}`);
     if (t.note) for (const line of t.note.split('\n')) out.push(`${pad}  > ${line}`);
-    t.children.forEach((c) => walk(c, depth + 1));
+    walkChildren(t, depth + 1);
   };
-  map.roots[0].children.forEach((c) => walk(c, 0));
+  // A summary follows the last branch it sums up, marked with "»".
+  const walkChildren = (t: Topic, depth: number) => {
+    const ends = new Map<number, Topic[]>();
+    for (const s of t.summaries ?? []) {
+      const ix = rangeIndices(t, s);
+      if (ix) ends.set(ix[1], [...(ends.get(ix[1]) ?? []), s.topic]);
+    }
+    t.children.forEach((c, i) => {
+      walk(c, depth);
+      for (const s of ends.get(i) ?? []) out.push(`${'  '.repeat(depth)}- » ${s.text.replace(/\n/g, ' ')}`);
+    });
+  };
+  walkChildren(map.roots[0], 0);
   // Floating topics follow as their own sections.
   for (const r of map.roots.slice(1)) {
     out.push('', `## ${r.text.replace(/\n/g, ' ')}`, '');
     rootNote(r);
-    r.children.forEach((c) => walk(c, 0));
+    walkChildren(r, 0);
   }
   return out.join('\n') + '\n';
 }
