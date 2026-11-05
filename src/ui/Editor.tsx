@@ -504,6 +504,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     save: { run: () => saveToFile() },
     saveAs: { run: () => saveToFile(true), enabled: canLinkFiles() },
     toggleOutline: { run: () => switchView(view === 'map' ? 'outline' : 'map') },
+    notebook: { run: () => commit(setMapProps(map, { notebook: !map.notebook })), enabled: !readOnly },
     zoomIn: { run: () => canvas.current?.zoomBy(1.2), enabled: view === 'map' },
     zoomOut: { run: () => canvas.current?.zoomBy(1 / 1.2), enabled: view === 'map' },
     fit: { run: () => canvas.current?.fit(), enabled: view === 'map' },
@@ -722,6 +723,14 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               </button>
             ))}
           </div>
+          <button
+            className={`tb ${map.notebook ? 'on' : ''}`}
+            aria-pressed={!!map.notebook}
+            title={tip('notebook', t('tb.notebookTip'))}
+            onClick={commands.notebook.run}
+          >
+            <I.NotebookIcon />{t('tb.notebook')}
+          </button>
         </nav>
         )}
 

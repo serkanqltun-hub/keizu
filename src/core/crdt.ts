@@ -72,12 +72,13 @@ export interface MapLike {
   layout: string;
   branchStyle: string;
   multicolor: boolean;
+  notebook?: boolean;
   roots: TopicLike[];
   relations: RelationLike[];
   resources?: Record<string, string>;
 }
 
-const META_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor'];
+const META_FIELDS = ['title', 'theme', 'layout', 'branchStyle', 'multicolor', 'notebook'];
 const RES = 'res:';
 
 export function emptyDoc(): CrdtDoc {
@@ -339,6 +340,7 @@ export function materialize(doc: CrdtDoc): MapLike {
     layout: String(m('layout', 'mindmap')),
     branchStyle: String(m('branchStyle', 'curve')),
     multicolor: m('multicolor', true) !== false,
+    ...(m('notebook', false) === true ? { notebook: true } : {}),
     roots,
     relations,
     resources: Object.keys(resources).length ? resources : undefined,

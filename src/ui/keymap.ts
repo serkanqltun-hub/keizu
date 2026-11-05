@@ -33,6 +33,7 @@ export type CommandId =
   | 'save'
   | 'saveAs'
   | 'toggleOutline'
+  | 'notebook'
   | 'zoomIn'
   | 'zoomOut'
   | 'fit'
@@ -84,6 +85,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'collapse', keys: ['Mod+/'], group: 'navigate' },
   { id: 'centerSelected', keys: ['Mod+Enter'], group: 'navigate' },
   { id: 'toggleOutline', keys: ['Mod+Alt+O'], group: 'view' },
+  { id: 'notebook', keys: ['Mod+Alt+N'], group: 'view' },
   { id: 'zoomIn', keys: ['Mod+=', 'Mod++'], group: 'view' },
   { id: 'zoomOut', keys: ['Mod+-'], group: 'view' },
   { id: 'fit', keys: ['Mod+0'], group: 'view' },

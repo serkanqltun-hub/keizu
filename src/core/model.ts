@@ -78,6 +78,11 @@ export interface MindMap {
   layout: LayoutKind;
   branchStyle: BranchStyle;
   multicolor: boolean;
+  /**
+   * Notebook mode: every topic with a note shows its full note inside the
+   * topic, as a card. A view setting, saved with the map.
+   */
+  notebook?: boolean;
   /** roots[0] is the main topic; any others float on the canvas. */
   roots: Topic[];
   relations: Relation[];
@@ -321,8 +326,10 @@ export function toggleCollapse(map: MindMap, id: string): MindMap {
   return updateTopic(map, id, { collapsed: !t.collapsed });
 }
 
-export function setMapProps(map: MindMap, patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'title'>>): MindMap {
-  return { ...map, ...patch, updatedAt: new Date().toISOString() };
+export function setMapProps(map: MindMap, patch: Partial<Pick<MindMap, 'theme' | 'layout' | 'branchStyle' | 'multicolor' | 'title' | 'notebook'>>): MindMap {
+  const next = { ...map, ...patch, updatedAt: new Date().toISOString() };
+  if (!next.notebook) delete next.notebook;
+  return next;
 }
 
 /** Sets or clears (undefined) the layout of a topic's branch. */
