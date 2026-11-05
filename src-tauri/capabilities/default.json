@@ -8,6 +8,8 @@
     "dialog:default",
     "deep-link:default",
     "opener:default",
+    "updater:default",
+    "process:allow-restart",
     {
       "identifier": "http:default",
       "allow": [{ "url": "https://*" }, { "url": "http://*" }, { "url": "https://*:*" }, { "url": "http://*:*" }]

@@ -25,12 +25,32 @@
   },
   "plugins": {
     "deep-link": {
-      "desktop": { "schemes": ["keizu"] }
+      "desktop": {
+        "schemes": [
+          "keizu"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY2RjVCRjlERTA1NDdGMUYKUldRZmYxVGduYi8xWm16eFhwZDlyY2FXV0tNTHRoSVJsR09zYlFVTU1pNGZ2bHVjWFFkOEVhQk8K",
+      "endpoints": [
+        "https://github.com/serkanqltun-hub/keizu/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis",
+      "app",
+      "dmg",
+      "deb",
+      "rpm",
+      "appimage"
+    ],
     "category": "Productivity",
     "shortDescription": "Open-source mind mapping",
     "icon": [
