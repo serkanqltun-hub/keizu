@@ -19,7 +19,14 @@ export interface CanvasHandle {
   centerRoot(): void;
   /** Pans (and zooms in if far out) so a topic sits in the middle. */
   centerOn(id: string): void;
+  /** Back to 100 %, around the middle of the canvas. */
+  resetZoom(): void;
+  /** Where a topic is on screen (client coordinates), if it is drawn. */
+  topicRect(id: string): DOMRect | undefined;
 }
+
+/** What was right-clicked on the canvas. */
+export type CanvasTarget = { kind: 'topic'; id: string } | { kind: 'relation'; id: string } | { kind: 'canvas'; pos: Point };
 
 /** Re-renders only when the map, selection or snapped viewport changes, not on every pan step. */
 const MemoMapSvg = memo(MapSvg);
@@ -51,6 +58,8 @@ interface Props {
   onMove(id: string, parentId: string): void;
   onToggleCollapse(id: string): void;
   onZoomChange(k: number): void;
+  /** Right click (or a long press) on a topic, a relation or empty canvas. */
+  onContextMenu?(target: CanvasTarget, clientX: number, clientY: number): void;
   /** The link icon on a topic was clicked. */
   onOpenLink?(id: string): void;
   /** Topic whose note card is open on the canvas. */
@@ -242,7 +251,29 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     [centerView, animateTo],
   );
 
-  useImperativeHandle(ref, () => ({ zoomBy: (f) => zoomAt(f), fit, centerRoot, centerOn }), [zoomAt, fit, centerRoot, centerOn]);
+  const topicRect = useCallback(
+    (id: string) => {
+      const rect = wrap.current?.getBoundingClientRect();
+      const b = layout.byId.get(id);
+      if (!rect || !b) return undefined;
+      const v = viewRef.current;
+      return new DOMRect(rect.left + v.x + (b.x - b.w / 2) * v.k, rect.top + v.y + (b.y - b.h / 2) * v.k, b.w * v.k, b.h * v.k);
+    },
+    [layout],
+  );
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      zoomBy: (f) => zoomAt(f),
+      resetZoom: () => zoomAt(1 / (cam.current.target ?? viewRef.current).k),
+      fit,
+      centerRoot,
+      centerOn,
+      topicRect,
+    }),
+    [zoomAt, fit, centerRoot, centerOn, topicRect],
+  );
 
   // Fit the map when it is opened (at once) and when its layout kind changes
   // (eased); when opened from a search, show the found topic instead.
@@ -434,6 +465,20 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     setDrag(null);
   };
 
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    // A Ctrl+click on macOS also sent a press: don't start a drag from it.
+    gesture.current = null;
+    setDrag(null);
+    if (!props.onContextMenu || editingId) return;
+    const el = e.target as Element;
+    const p = toMap(e.clientX, e.clientY);
+    const topicId = el.closest('[data-topic-id]')?.getAttribute('data-topic-id') ?? (simple ? hitTest(p.x, p.y, null)?.id : undefined);
+    const relId = el.closest('[data-relation-id]')?.getAttribute('data-relation-id');
+    const target: CanvasTarget = topicId ? { kind: 'topic', id: topicId } : relId ? { kind: 'relation', id: relId } : { kind: 'canvas', pos: { x: Math.round(p.x), y: Math.round(p.y) } };
+    props.onContextMenu(target, e.clientX, e.clientY);
+  };
+
   const onDoubleClick = (e: React.MouseEvent) => {
     const p = toMap(e.clientX, e.clientY);
     const topicId = (e.target as Element).closest('[data-topic-id]')?.getAttribute('data-topic-id') ?? (simple ? hitTest(p.x, p.y, null)?.id : undefined);
@@ -472,6 +517,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerUp}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
         role="application"
         aria-label={t('canvas.label', { title: map.title })}
       >

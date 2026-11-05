@@ -115,3 +115,10 @@ export const Folder = ({ size }: P) => (
     <path d="M4 7h6l2 2h8v10H4z" />
   </Svg>
 );
+export const Copy = (p: P) => <Svg {...p}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M16 8V5a1 1 0 0 0-1-1H5a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" /></Svg>;
+export const Cut = (p: P) => <Svg {...p}><circle cx="6" cy="18" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8 16.5L18 4M16 16.5L6 4" /></Svg>;
+export const Paste = (p: P) => <Svg {...p}><path d="M9 4h6v3H9z" /><path d="M15 5h3v16H6V5h3" /><path d="M9 12h6M9 16h4" /></Svg>;
+export const Pencil = (p: P) => <Svg {...p}><path d="M4 20l1-4L16 5l3 3L8 19z" /><path d="M14 7l3 3" /></Svg>;
+export const LinkIcon = (p: P) => <Svg {...p}><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" /></Svg>;
+export const ShapeIcon = (p: P) => <Svg {...p}><rect x="3" y="7" width="12" height="10" rx="3" /><circle cx="17" cy="9" r="4" /></Svg>;
+export const RootIcon = (p: P) => <Svg {...p}><rect x="8" y="9" width="8" height="6" rx="2" /><path d="M12 9V4M12 20v-5M8 12H3M21 12h-5" /></Svg>;

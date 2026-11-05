@@ -18,6 +18,9 @@ import {
   removeRelation,
   updateRelation,
   findTopic,
+  pasteFloating,
+  LAYOUT_KINDS,
+  type TopicShape,
   moveTopic,
   pasteTopic,
   removeTopic,
@@ -31,7 +34,7 @@ import {
   type MindMap,
   type Topic,
 } from '../core/model';
-import { getTheme } from '../core/themes';
+import { FILL_SWATCHES, getTheme } from '../core/themes';
 import { SNAPSHOT_EVERY_MS } from '../core/versions';
 import type { FileLink, LibraryStore } from '../sync/types';
 import { exportKeizu, exportMarkdown, exportOpml, exportPdf, exportPlainJson, exportPng, exportSvg, safeFileName } from './exporters';
@@ -40,7 +43,8 @@ import { canLinkFiles, chooseSaveTarget, encodeForFile, isDesktop, linkWritable,
 import { VersionPanel } from './VersionPanel';
 import { FormatPanel } from './FormatPanel';
 import * as I from './Icons';
-import { MapCanvas, type CanvasHandle } from './MapCanvas';
+import { MapCanvas, type CanvasHandle, type CanvasTarget } from './MapCanvas';
+import { ContextMenu, tidy, type CtxItem } from './ContextMenu';
 import type { NoteSave } from './NotePopover';
 import { canvasMeasure } from './measure';
 import { OutlineView } from './OutlineView';
@@ -138,6 +142,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const [toast, setToast] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [presenting, setPresenting] = useState(false);
+  // The open right-click menu: what it is for and where.
+  const [ctx, setCtx] = useState<{ x: number; y: number; target: CanvasTarget; kb?: boolean } | null>(null);
   // Topic whose note card is open on the canvas.
   const [noteId, setNoteId] = useState<string | null>(null);
   // Other maps, for linking a topic to one.
@@ -473,9 +479,208 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     },
   };
 
+  // ---------- right-click menu ----------
+
+  const keyOf = (id: CommandId) => (keymap[id][0] ? fmt(keymap[id][0]) : undefined);
+  const closeMenu = useCallback(() => setCtx(null), []);
+
+  const openMenu = (target: CanvasTarget, x: number, y: number) => {
+    setRelationFrom(null);
+    if (target.kind === 'topic') selectTopic(target.id);
+    if (target.kind === 'relation') {
+      setSelectedRelId(target.id);
+      setSelectedId(null);
+    }
+    setCtx({ x, y, target });
+  };
+
+  /** Shift+F10 or the menu key: the menu for the selection, next to it. */
+  const openMenuFromKeyboard = () => {
+    const rect = selectedId && view === 'map' ? canvas.current?.topicRect(selectedId) : undefined;
+    const area = document.querySelector('.canvas-area')?.getBoundingClientRect();
+    const sel = selectedId ? document.querySelector('.o-row.on')?.getBoundingClientRect() : undefined;
+    if (selectedRelId) {
+      const r = area ?? new DOMRect(0, 0, window.innerWidth, window.innerHeight);
+      return setCtx({ x: r.left + r.width / 2, y: r.top + r.height / 2, target: { kind: 'relation', id: selectedRelId }, kb: true });
+    }
+    if (selectedId) {
+      const r = rect ?? sel;
+      const x = r ? r.left + Math.min(r.width, 40) : (area?.left ?? 0) + 40;
+      const y = r ? r.bottom + 4 : (area?.top ?? 0) + 40;
+      return setCtx({ x, y, target: { kind: 'topic', id: selectedId }, kb: true });
+    }
+    if (view === 'map' && area) setCtx({ x: area.left + area.width / 2, y: area.top + area.height / 2, target: { kind: 'canvas', pos: { x: 0, y: (layout.bounds.maxY ?? 0) + 120 } }, kb: true });
+  };
+
+  const topicMenu = (id: string): CtxItem[] => {
+    const tp = findTopic(map, id);
+    if (!tp) return [];
+    const isMain = id === mainId;
+    const hasKids = tp.children.length > 0;
+    const style = tp.style ?? {};
+    const item = (cid: CommandId, run: () => void, extra: Partial<Extract<CtxItem, { type: 'item' }>> = {}): CtxItem => ({
+      type: 'item',
+      id: cid,
+      label: cmdLabel(cid),
+      keys: keyOf(cid),
+      run,
+      ...extra,
+    });
+    const sep: CtxItem = { type: 'sep' };
+    const box = layout.byId.get(id);
+    const ownLayout = tp.layout;
+    const inherited = (box ? layout.byId.get(box.parentId ?? '')?.layout : undefined) ?? map.layout;
+    if (readOnly) {
+      return tidy([
+        item('copy', () => actions.copy(), { icon: <I.Copy size={16} /> }),
+        tp.href && item('openLink', () => actions.openLink(id), { icon: <I.LinkIcon size={16} /> }),
+        tp.note && view === 'map' && { type: 'item', id: 'note', label: cmdLabel('note'), icon: <I.NoteIcon size={16} />, run: () => setNoteId(id) },
+        sep,
+        view === 'map' && { type: 'item', id: 'focus', label: t('ctx.focus'), keys: keyOf('centerSelected'), icon: <I.Target size={16} />, run: () => canvas.current?.centerOn(id) },
+      ]);
+    }
+    return tidy([
+      item('addChild', actions.addChild, { icon: <I.SubtopicIcon size={16} /> }),
+      item('addSibling', () => actions.addSibling(), { icon: <I.TopicIcon size={16} /> }),
+      sep,
+      item('edit', () => startEdit(id), { icon: <I.Pencil size={16} /> }),
+      item('note', actions.note, { label: tp.note ? t('ctx.editNote') : cmdLabel('note'), icon: <I.NoteIcon size={16} /> }),
+      tp.image
+        ? { type: 'item', id: 'image', label: t('tb.removeImage'), icon: <I.ImageIcon size={16} />, run: () => commit(removeTopicImage(map, id)) }
+        : { type: 'item', id: 'image', label: t('ctx.addImage'), icon: <I.ImageIcon size={16} />, run: () => imageInput.current?.click() },
+      tp.href && item('openLink', () => actions.openLink(id), { icon: <I.LinkIcon size={16} /> }),
+      sep,
+      {
+        type: 'swatches',
+        id: 'color',
+        label: t('ctx.color'),
+        colors: [
+          { value: undefined, label: t('ctx.autoColor'), on: !style.fill },
+          ...FILL_SWATCHES.map((c) => ({ value: c, label: t('panel.fillColor', { color: c }), on: style.fill === c })),
+        ],
+        pick: (fill) => commit(updateStyle(map, id, { fill })),
+      },
+      {
+        type: 'sub',
+        id: 'shape',
+        label: t('ctx.shape'),
+        icon: <I.ShapeIcon size={16} />,
+        items: [
+          { type: 'item', id: 'auto', label: t('panel.auto'), checked: !style.shape, run: () => commit(updateStyle(map, id, { shape: undefined })) },
+          ...(['rounded', 'pill', 'rect', 'underline', 'none'] as TopicShape[]).map<CtxItem>((sh) => ({
+            type: 'item',
+            id: sh,
+            label: t(`shape.${sh}`),
+            checked: style.shape === sh,
+            run: () => commit(updateStyle(map, id, { shape: sh })),
+          })),
+        ],
+      },
+      {
+        type: 'sub',
+        id: 'layout',
+        label: t('ctx.branchLayout'),
+        icon: <I.MapIcon size={16} />,
+        items: [
+          { type: 'item', id: 'inherit', label: t('panel.branchInherit', { layout: layoutName(inherited) }), checked: !ownLayout, run: () => commit(setBranchLayout(map, id, undefined)) },
+          { type: 'sep' },
+          ...LAYOUT_KINDS.map<CtxItem>((k) => ({ type: 'item', id: k, label: layoutName(k), checked: ownLayout === k, run: () => commit(setBranchLayout(map, id, k)) })),
+        ],
+      },
+      {
+        type: 'item',
+        id: 'markers',
+        label: t('ctx.markers'),
+        icon: <I.MarkerIcon size={16} />,
+        run: () => {
+          setPanelOpen(true);
+          setHistoryOpen(false);
+          setPanelTab('style');
+        },
+      },
+      sep,
+      hasKids && !isMain && item('collapse', actions.collapse, { label: tp.collapsed ? t('ctx.expand') : t('ctx.collapse'), icon: <I.Collapse size={16} /> }),
+      item('relation', actions.relation, { icon: <I.RelationIcon size={16} /> }),
+      view === 'map' && { type: 'item', id: 'focus', label: t('ctx.focus'), keys: keyOf('centerSelected'), icon: <I.Target size={16} />, run: () => canvas.current?.centerOn(id) },
+      sep,
+      !isMain && item('cut', () => actions.copy(true), { icon: <I.Cut size={16} /> }),
+      item('copy', () => actions.copy(), { icon: <I.Copy size={16} /> }),
+      item('paste', actions.paste, { disabled: !clipboard.current, icon: <I.Paste size={16} /> }),
+      sep,
+      !isMain && item('remove', actions.remove, { danger: true, icon: <I.Trash size={16} /> }),
+    ]);
+  };
+
+  const canvasMenu = (pos: { x: number; y: number }): CtxItem[] => {
+    const sep: CtxItem = { type: 'sep' };
+    const viewItems: CtxItem[] = [
+      { type: 'item', id: 'fit', label: cmdLabel('fit'), keys: keyOf('fit'), icon: <I.Target size={16} />, run: () => canvas.current?.fit() },
+      { type: 'item', id: 'zoom100', label: t('ctx.resetZoom'), icon: <I.Search size={16} />, run: () => canvas.current?.resetZoom() },
+      { type: 'item', id: 'root', label: t('ctx.centerRoot'), icon: <I.RootIcon size={16} />, run: () => goTo(mainId) },
+    ];
+    const more: CtxItem[] = [
+      { type: 'item', id: 'outline', label: t('ctx.outline'), keys: keyOf('toggleOutline'), icon: <I.OutlineIcon size={16} />, run: () => switchView('outline') },
+      { type: 'item', id: 'present', label: cmdLabel('present'), keys: keyOf('present'), icon: <I.Present size={16} />, run: () => setPresenting(true) },
+    ];
+    if (readOnly) return tidy([...viewItems, sep, ...more]);
+    return tidy([
+      { type: 'item', id: 'floating', label: t('ctx.floatingHere'), icon: <I.FloatingIcon size={16} />, run: () => actions.floating(pos) },
+      clipboard.current && {
+        type: 'item',
+        id: 'paste',
+        label: t('ctx.pasteHere'),
+        keys: keyOf('paste'),
+        icon: <I.Paste size={16} />,
+        run: () => {
+          const r = pasteFloating(map, pos, clipboard.current!);
+          commit(r.map, r.id);
+        },
+      },
+      sep,
+      { type: 'item', id: 'undo', label: cmdLabel('undo'), keys: keyOf('undo'), disabled: !commands.undo.enabled, icon: <I.Undo size={16} />, run: actions.undo },
+      { type: 'item', id: 'redo', label: cmdLabel('redo'), keys: keyOf('redo'), disabled: !commands.redo.enabled, icon: <I.Redo size={16} />, run: actions.redo },
+      sep,
+      ...viewItems,
+      {
+        type: 'sub',
+        id: 'mapLayout',
+        label: t('ctx.mapLayout'),
+        icon: <I.MapIcon size={16} />,
+        items: LAYOUT_KINDS.map<CtxItem>((k) => ({ type: 'item', id: k, label: layoutName(k), checked: map.layout === k, run: () => map.layout !== k && commit(setMapProps(map, { layout: k })) })),
+      },
+      sep,
+      ...more,
+      { type: 'item', id: 'panel', label: cmdLabel('panel'), icon: <I.Panel size={16} />, run: () => { setPanelOpen(true); setHistoryOpen(false); setPanelTab('map'); } },
+    ]);
+  };
+
+  const relationMenu = (id: string): CtxItem[] => {
+    const rel = map.relations.find((r) => r.id === id);
+    if (!rel) return [];
+    return tidy([
+      !readOnly && {
+        type: 'item',
+        id: 'label',
+        label: t('ctx.relLabel'),
+        icon: <I.Pencil size={16} />,
+        run: () => {
+          setPanelOpen(true);
+          setHistoryOpen(false);
+          setPanelTab('style');
+          setTimeout(() => document.getElementById('relation-label')?.focus(), 0);
+        },
+      },
+      { type: 'item', id: 'from', label: t('ctx.relFrom'), icon: <I.Back size={16} />, run: () => goTo(rel.from) },
+      { type: 'item', id: 'to', label: t('ctx.relTo'), icon: <I.Chevron size={16} />, run: () => goTo(rel.to) },
+      { type: 'sep' },
+      !readOnly && { type: 'item', id: 'remove', label: t('ctx.relDelete'), keys: keyOf('remove'), danger: true, icon: <I.Trash size={16} />, run: () => { commit(removeRelation(map, id)); setSelectedRelId(null); } },
+    ]);
+  };
+
   /** Everything the keyboard and the command palette can run. */
   const commands: Record<CommandId, { run(): void; enabled?: boolean }> = {
     palette: { run: () => setPaletteOpen((v) => !v) },
+    contextMenu: { run: () => openMenuFromKeyboard() },
     shortcuts: { run: () => setKeysOpen((v) => !v) },
     language: { run: () => setLang(getLang() === 'tr' ? 'en' : 'tr') },
     back: { run: onBack },
@@ -519,7 +724,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   // Keyboard shortcuts (inactive while typing in a field or a dialog is open).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (editingId || keysOpen || presenting || shareOpen) return;
+      if (editingId || keysOpen || presenting || shareOpen || ctx) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
       const combo = comboFromEvent(e);
@@ -650,6 +855,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onCommitEdit={commitEdit}
               onCancelEdit={cancelEdit}
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
+              onContextMenu={(id, x, y) => openMenu({ kind: 'topic', id }, x, y)}
             />
           </div>
           <button className="op-foot" onClick={() => setPaletteOpen(true)}>
@@ -835,6 +1041,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
               onZoomChange={setZoom}
               onOpenLink={(id) => actions.openLink(id)}
+              onContextMenu={openMenu}
               noteId={noteId}
               onOpenNote={setNoteId}
               onCloseNote={() => setNoteId(null)}
@@ -854,6 +1061,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onCommitEdit={commitEdit}
               onCancelEdit={cancelEdit}
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
+              onContextMenu={(id, x, y) => openMenu({ kind: 'topic', id }, x, y)}
             />
           )}
           {view === 'map' && (
@@ -920,6 +1128,17 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
 
       {paletteOpen && (
         <CommandPalette map={map} commands={paletteCommands} onPickTopic={goTo} onClose={() => setPaletteOpen(false)} />
+      )}
+      {ctx && (
+        <ContextMenu
+          key={`${ctx.x},${ctx.y}`}
+          x={ctx.x}
+          y={ctx.y}
+          keyboard={ctx.kb}
+          label={t(ctx.target.kind === 'topic' ? 'ctx.topicMenu' : ctx.target.kind === 'relation' ? 'ctx.relationMenu' : 'ctx.canvasMenu')}
+          items={ctx.target.kind === 'topic' ? topicMenu(ctx.target.id) : ctx.target.kind === 'relation' ? relationMenu(ctx.target.id) : canvasMenu(ctx.target.pos)}
+          onClose={closeMenu}
+        />
       )}
       {keysOpen && <KeysDialog onClose={() => setKeysOpen(false)} />}
       {shareOpen && <ShareDialog map={map} onClose={() => setShareOpen(false)} onShared={live.enable} />}

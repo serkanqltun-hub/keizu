@@ -448,6 +448,12 @@ export function pasteTopic(map: MindMap, parentId: string, topic: Topic): { map:
   return { map: mapTopic(map, parentId, (p) => ({ ...p, collapsed: false, children: [...p.children, copy] })), id: copy.id };
 }
 
+/** Pastes a copy as a new free-floating tree at a canvas position. */
+export function pasteFloating(map: MindMap, pos: Point, topic: Topic): { map: MindMap; id: string } {
+  const copy: Topic = { ...cloneWithNewIds(topic), pos };
+  return { map: touch({ ...map, roots: [...map.roots, copy] }), id: copy.id };
+}
+
 // ---------- validation ----------
 
 export function isMindMap(x: unknown): x is MindMap {
