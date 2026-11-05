@@ -48,6 +48,9 @@ export function KeysDialog({ onClose }: { onClose(): void }) {
     ['Esc', 'keys.fixed.escape'],
     [t('keys.fixed.dragKey'), 'keys.fixed.drag'],
     [t('keys.fixed.dblKey'), 'keys.fixed.dbl'],
+    [t('keys.fixed.selectKey'), 'keys.fixed.select'],
+    [t('keys.fixed.boxKey'), 'keys.fixed.box'],
+    [t('keys.fixed.pasteKey'), 'keys.fixed.paste'],
     [`${fmt('Mod')}+${t('keys.fixed.wheel')}`, 'keys.fixed.zoom'],
   ];
 

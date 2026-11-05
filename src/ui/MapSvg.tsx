@@ -295,6 +295,8 @@ interface MapSvgProps {
   layout: MapLayout;
   theme: Theme;
   selectedId?: string;
+  /** Every selected topic when several are (multi-select). */
+  selectedIds?: ReadonlySet<string>;
   selectedRelId?: string;
   dimIds?: Set<string>;
   /** Draw only what touches this map-space rectangle. */
@@ -305,9 +307,10 @@ interface MapSvgProps {
   fade?: Map<string, number>;
 }
 
-export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, viewport, simple, fade }: MapSvgProps) {
+export function MapSvg({ map, layout, theme, selectedId, selectedIds, selectedRelId, dimIds, viewport, simple, fade }: MapSvgProps) {
   const vis = visibleIn(layout, viewport);
-  if (simple) return <SimpleMap map={map} layout={layout} theme={theme} nodes={vis.nodes} edges={vis.edges} selectedId={selectedId} />;
+  const isSel = (id: string) => id === selectedId || !!selectedIds?.has(id);
+  if (simple) return <SimpleMap map={map} layout={layout} theme={theme} nodes={vis.nodes} edges={vis.edges} isSel={isSel} />;
   return (
     <g>
       <g fill="none" strokeLinecap="round">
@@ -322,7 +325,7 @@ export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, 
       </g>
       <LinkLabels map={map} layout={layout} edges={vis.edges} theme={theme} />
       {vis.nodes.map((b) => (
-        <TopicView key={b.id} b={b} theme={theme} selected={b.id === selectedId} dimmed={dimIds?.has(b.id)} opacity={fade?.get(b.id) ?? 1} />
+        <TopicView key={b.id} b={b} theme={theme} selected={isSel(b.id)} dimmed={dimIds?.has(b.id)} opacity={fade?.get(b.id) ?? 1} />
       ))}
       {vis.nodes.map((b) => (
         <CollapseBadge key={`c-${b.id}`} b={b} theme={theme} />
@@ -337,7 +340,7 @@ export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, 
  * and every topic of one fill is a single path, so even 10,000 topics are a
  * handful of DOM nodes. Text is unreadable at this zoom anyway.
  */
-function SimpleMap({ map, layout, theme, nodes, edges, selectedId }: { map: MindMap; layout: MapLayout; theme: Theme; nodes: NodeBox[]; edges: NodeBox[]; selectedId?: string }) {
+function SimpleMap({ map, layout, theme, nodes, edges, isSel }: { map: MindMap; layout: MapLayout; theme: Theme; nodes: NodeBox[]; edges: NodeBox[]; isSel(id: string): boolean }) {
   const edgeD = new Map<string, string[]>();
   for (const c of edges) {
     if (c.noEdge) continue;
@@ -356,14 +359,14 @@ function SimpleMap({ map, layout, theme, nodes, edges, selectedId }: { map: Mind
     list.push(`M${b.x - b.w / 2} ${b.y + b.h / 2 - h}h${b.w}v${h}h${-b.w}z`);
     fillD.set(color, list);
   }
-  const sel = selectedId ? layout.byId.get(selectedId) : undefined;
+  const sel = nodes.filter((b) => isSel(b.id));
   return (
     <g>
       <g fill="none" strokeWidth={2}>
         {[...edgeD].map(([color, ds]) => <path key={color} d={ds.join('')} stroke={color} />)}
       </g>
       {[...fillD].map(([color, ds]) => <path key={color} d={ds.join('')} fill={color} opacity={0.85} />)}
-      {sel && <rect x={sel.x - sel.w / 2 - 6} y={sel.y - sel.h / 2 - 6} width={sel.w + 12} height={sel.h + 12} rx={8} fill="none" stroke={SELECT_COLOR} strokeWidth={4} />}
+      {sel.map((b) => <rect key={b.id} x={b.x - b.w / 2 - 6} y={b.y - b.h / 2 - 6} width={b.w + 12} height={b.h + 12} rx={8} fill="none" stroke={SELECT_COLOR} strokeWidth={4} />)}
     </g>
   );
 }

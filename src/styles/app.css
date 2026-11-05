@@ -442,3 +442,10 @@ mark { background: color-mix(in srgb, #ffd43b 55%, transparent); color: inherit;
 html.kz-reduce-motion * { animation: none !important; transition: none !important; }
 button.nav-item { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
 button.nav-item:hover:not(.on) { background: var(--soft); }
+
+/* Multi-select */
+.multi-note { padding-bottom: 4px; }
+.multi-note strong { display: block; font-size: 13px; color: var(--accent); }
+.multi-note p { margin: 4px 0 0; }
+.sb-sel { color: var(--accent); font-weight: 600; }
+.o-row.on-multi { background: var(--accent-soft); }

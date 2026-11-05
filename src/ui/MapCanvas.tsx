@@ -60,6 +60,19 @@ interface Props {
   onSaveNote?(id: string, save: NoteSave): void;
   /** View only: no dragging, no new topics. */
   readOnly?: boolean;
+  /** Every selected topic, when more than one is (multi-select). */
+  selectedIds?: ReadonlySet<string>;
+  /** Ctrl/⌘+click (toggle) or Shift+click (add) on a topic. */
+  onSelectExtend?(id: string, toggle: boolean): void;
+  /** Shift/Ctrl+drag on empty space drew a box around these topics. */
+  onSelectBox?(ids: string[], additive: boolean): void;
+  /** Several selected topics were dropped on a topic. */
+  onMoveMany?(ids: string[], parentId: string): void;
+  /** Several selected topics were dropped on empty space, moved by `delta`. */
+  onFloatMany?(ids: string[], delta: Point): void;
+  /** Format painter: the next topic click gives it the copied look. */
+  painting?: boolean;
+  onPaint?(id: string): void;
   /** Other people in a live session and the topic each has selected. */
   peers?: { id: string; name: string; color: string; selectedId?: string | null }[];
 }
@@ -69,6 +82,11 @@ interface View {
   y: number;
   k: number;
 }
+
+// A small paint brush, for the format painter.
+const BRUSH_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#fff" stroke="#1f2328" stroke-width="1.6" stroke-linejoin="round"><rect x="4" y="3" width="14" height="6" rx="1.5"/><path d="M18 6h2v5h-8v3" fill="none"/><rect x="10.5" y="14" width="3" height="7" rx="1"/></svg>',
+)}") 12 22, copy`;
 
 const MIN_K = 0.05;
 const MAX_K = 3;
@@ -98,11 +116,14 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     return () => ro.disconnect();
   }, []);
 
-  const [drag, setDrag] = useState<{ id: string; x: number; y: number; target: string | null } | null>(null);
+  const [drag, setDrag] = useState<{ id: string; x: number; y: number; target: string | null; group: string[] | null } | null>(null);
+  // Selection box being drawn (map coordinates).
+  const [box, setBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [pointer, setPointer] = useState<Point | null>(null);
   const gesture = useRef<
     | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; trail: { x: number; y: number; t: number }[] }
-    | { kind: 'topic'; id: string; sx: number; sy: number; ox: number; oy: number; dragging: boolean }
+    | { kind: 'topic'; id: string; sx: number; sy: number; ox: number; oy: number; dragging: boolean; group: string[] | null }
+    | { kind: 'box'; additive: boolean }
     | null
   >(null);
 
@@ -317,12 +338,18 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     return { x: (clientX - rect.left - v.x) / v.k, y: (clientY - rect.top - v.y) / v.k };
   };
 
-  const dragged = useMemo(() => {
-    if (!drag) return null;
-    const t = findTopic(map, drag.id);
-    return t ? subtreeIds(t) : null;
+  /** The dragged topics and everything under them. */
+  const draggedIds = (id: string, group: string[] | null) => {
+    const out = new Set<string>();
+    for (const g of group ?? [id]) {
+      const t = findTopic(map, g);
+      if (t) subtreeIds(t, out);
+    }
+    return out;
+  };
+  const dragged = useMemo(() => (drag ? draggedIds(drag.id, drag.group) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [drag?.id, map]);
+    [drag?.id, drag?.group, map]);
 
   const hitTest = (x: number, y: number, exclude: Set<string> | null): NodeBox | undefined => {
     for (let i = layout.nodes.length - 1; i >= 0; i--) {
@@ -354,6 +381,15 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       if (topicId) props.onPickRelationTarget(topicId);
       return;
     }
+    if (props.painting) {
+      if (topicId && e.button === 0) props.onPaint?.(topicId);
+      return;
+    }
+    const additive = e.button === 0 && (e.shiftKey || e.ctrlKey || e.metaKey);
+    if (topicId && additive && props.onSelectExtend && !el.closest('[data-link-glyph], [data-note-glyph]')) {
+      props.onSelectExtend(topicId, e.ctrlKey || e.metaKey);
+      return;
+    }
     if (topicId && el.closest('[data-link-glyph]') && props.onOpenLink) {
       props.onSelect(topicId);
       props.onOpenLink(topicId);
@@ -372,12 +408,20 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     if (topicId && e.button === 0) {
       const id = topicId;
-      if (id !== editingId) props.onSelect(id);
+      // Grabbing one of several selected topics drags them all; a plain
+      // click (no drag) then selects just that one.
+      const sel = props.selectedIds;
+      const group = sel && sel.size > 1 && sel.has(id) ? [...sel] : null;
+      if (id !== editingId && !group) props.onSelect(id);
       // Remember where inside the box it was grabbed, so a moved root
       // doesn't jump to the pointer.
       const b = layout.byId.get(id);
       const p = toMap(e.clientX, e.clientY);
-      gesture.current = { kind: 'topic', id, sx: e.clientX, sy: e.clientY, ox: b ? p.x - b.x : 0, oy: b ? p.y - b.y : 0, dragging: false };
+      gesture.current = { kind: 'topic', id, sx: e.clientX, sy: e.clientY, ox: b ? p.x - b.x : 0, oy: b ? p.y - b.y : 0, dragging: false, group };
+    } else if (!topicId && additive && props.onSelectBox && !editingId) {
+      stopCamera();
+      gesture.current = { kind: 'box', additive: true };
+      setBox({ x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y });
     } else {
       if (editingId) return;
       props.onSelect(null);
@@ -398,16 +442,20 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       setView((v) => ({ ...v, x: g.vx + e.clientX - g.sx, y: g.vy + e.clientY - g.sy }));
       return;
     }
+    if (g.kind === 'box') {
+      const p = toMap(e.clientX, e.clientY);
+      setBox((bx) => (bx ? { ...bx, x1: p.x, y1: p.y } : bx));
+      return;
+    }
     if (g.id === map.roots[0].id || g.id === editingId || props.readOnly) return;
     if (!g.dragging && Math.hypot(e.clientX - g.sx, e.clientY - g.sy) < 5) return;
     g.dragging = true;
     const p = toMap(e.clientX, e.clientY);
-    const t = findTopic(map, g.id);
-    const exclude = t ? subtreeIds(t) : null;
+    const exclude = draggedIds(g.id, g.group);
     // Roots keep their grab offset; other topics are carried by the pointer.
     const root = isRoot(map, g.id);
     const x = root ? p.x - g.ox : p.x, y = root ? p.y - g.oy : p.y;
-    setDrag({ id: g.id, x, y, target: hitTest(p.x, p.y, exclude)?.id ?? null });
+    setDrag({ id: g.id, x, y, target: hitTest(p.x, p.y, exclude)?.id ?? null, group: g.group });
   };
 
   const onPointerUp = () => {
@@ -425,10 +473,25 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
         }
       }
     }
+    if (g?.kind === 'box') {
+      if (box) {
+        const x0 = Math.min(box.x0, box.x1), x1 = Math.max(box.x0, box.x1);
+        const y0 = Math.min(box.y0, box.y1), y1 = Math.max(box.y0, box.y1);
+        // Any topic the box touches is picked.
+        const ids = layout.nodes.filter((b) => b.x + b.w / 2 >= x0 && b.x - b.w / 2 <= x1 && b.y + b.h / 2 >= y0 && b.y - b.h / 2 <= y1).map((b) => b.id);
+        if (x1 - x0 > 2 || y1 - y0 > 2) props.onSelectBox?.(ids, g.additive);
+      }
+      setBox(null);
+    }
+    if (g?.kind === 'topic' && !g.dragging && g.group) props.onSelect(g.id);
     if (g?.kind === 'topic' && g.dragging && drag) {
       // Dropped on a topic: becomes its child. Dropped on empty canvas:
       // becomes (or stays) a free-floating tree at that spot.
-      if (drag.target) props.onMove(g.id, drag.target);
+      const from = layout.byId.get(g.id);
+      if (drag.group) {
+        if (drag.target) props.onMoveMany?.(drag.group, drag.target);
+        else if (from) props.onFloatMany?.(drag.group, { x: drag.x - from.x, y: drag.y - from.y });
+      } else if (drag.target) props.onMove(g.id, drag.target);
       else props.onFloat(g.id, { x: Math.round(drag.x), y: Math.round(drag.y) });
     }
     setDrag(null);
@@ -462,7 +525,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
         backgroundImage: view.k < 0.3 ? 'none' : `radial-gradient(${theme.grid} 1px, transparent 1px)`,
         backgroundSize: `${20 * view.k}px ${20 * view.k}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
-        cursor: props.relationFrom ? 'crosshair' : gesture.current?.kind === 'pan' ? 'grabbing' : 'default',
+        cursor: props.relationFrom || box ? 'crosshair' : props.painting ? BRUSH_CURSOR : gesture.current?.kind === 'pan' ? 'grabbing' : 'default',
       }}
     >
       <svg
@@ -483,6 +546,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
             fade={drawn.fade}
             theme={theme}
             selectedId={editingId ? undefined : selectedId ?? undefined}
+            selectedIds={editingId ? undefined : props.selectedIds}
             selectedRelId={props.selectedRelId ?? undefined}
             dimIds={dragged ?? undefined}
             viewport={viewport}
@@ -528,8 +592,27 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
           )}
           {drag && dragBox && (
             <g opacity={0.85} style={{ pointerEvents: 'none' }}>
+              {drag.group?.filter((id) => id !== drag.id && id !== map.roots[0].id).map((id) => {
+                const b = layout.byId.get(id);
+                return b ? <TopicView key={id} b={{ ...b, x: b.x + drag.x - dragBox.x, y: b.y + drag.y - dragBox.y }} theme={theme} /> : null;
+              })}
               <TopicView b={{ ...dragBox, x: drag.x, y: drag.y }} theme={theme} />
             </g>
+          )}
+          {box && (
+            <rect
+              x={Math.min(box.x0, box.x1)}
+              y={Math.min(box.y0, box.y1)}
+              width={Math.abs(box.x1 - box.x0)}
+              height={Math.abs(box.y1 - box.y0)}
+              fill={SELECT_COLOR}
+              fillOpacity={0.08}
+              stroke={SELECT_COLOR}
+              strokeWidth={1 / view.k}
+              strokeDasharray={`${4 / view.k} ${3 / view.k}`}
+              data-select-box=""
+              style={{ pointerEvents: 'none' }}
+            />
           )}
         </g>
       </svg>

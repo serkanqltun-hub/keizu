@@ -45,7 +45,11 @@ export type CommandId =
   | 'back'
   | 'present'
   | 'openLink'
-  | 'share';
+  | 'share'
+  | 'selectAll'
+  | 'formatPainter'
+  | 'copyStyle'
+  | 'pasteStyle';
 
 export interface CommandDef {
   id: CommandId;
@@ -71,6 +75,10 @@ export const COMMANDS: CommandDef[] = [
   { id: 'copy', keys: ['Mod+C'], group: 'edit' },
   { id: 'cut', keys: ['Mod+X'], group: 'edit' },
   { id: 'paste', keys: ['Mod+V'], group: 'edit' },
+  { id: 'selectAll', keys: ['Mod+A'], group: 'edit' },
+  { id: 'formatPainter', keys: [], group: 'edit' },
+  { id: 'copyStyle', keys: ['Mod+Alt+C'], group: 'edit' },
+  { id: 'pasteStyle', keys: ['Mod+Alt+V'], group: 'edit' },
   { id: 'moveUp', keys: ['Alt+ArrowUp'], group: 'edit' },
   { id: 'moveDown', keys: ['Alt+ArrowDown'], group: 'edit' },
   { id: 'indent', keys: ['Tab'], outlineOnly: true, group: 'edit' },
