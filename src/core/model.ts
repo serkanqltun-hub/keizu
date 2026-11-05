@@ -20,6 +20,8 @@ export interface TopicStyle {
   fontSize?: number;
   bold?: boolean;
   italic?: boolean;
+  /** Draw the note inside the topic, below its text. */
+  showNote?: boolean;
 }
 
 export interface Point {

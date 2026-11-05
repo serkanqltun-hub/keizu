@@ -53,6 +53,18 @@ export interface NodeBox {
   image?: { href: string; w: number; h: number };
   /** Vertical space the picture takes at the top of the box (0 without one). */
   imageH: number;
+  /** The note, when it is shown inside the topic below the text. */
+  noteBlock?: NoteBlock;
+}
+
+/** A topic's note drawn inside its box, wrapped to fit. */
+export interface NoteBlock {
+  lines: string[];
+  font: string;
+  fontSize: number;
+  lineHeight: number;
+  /** Vertical space it takes at the bottom of the box, gaps included. */
+  h: number;
 }
 
 export interface MapLayout {
@@ -92,6 +104,51 @@ function metricsFor(depth: number, boxed: boolean, t: Topic): Metrics {
 const IMAGE_MAX_W = 320;
 const IMAGE_MAX_H = 240;
 const IMAGE_GAP = 6;
+/** Space between the line above a shown note and its first line. */
+export const NOTE_GAP = 4;
+const NOTE_MIN_W = 180;
+const NOTE_MAX_W = 320;
+/** A shown note longer than this is cut, with "…" at the end. */
+const NOTE_MAX_LINES = 12;
+
+/** Breaks text into lines no wider than maxW, at spaces where it can. */
+export function wrapText(text: string, font: string, maxW: number, measure: Measure): string[] {
+  const out: string[] = [];
+  for (const para of text.split('\n')) {
+    let line = '';
+    for (const word of para.split(/(\s+)/)) {
+      if (!word) continue;
+      const next = line + word;
+      if (!line || measure(next, font) <= maxW) {
+        line = next;
+        continue;
+      }
+      out.push(line.trimEnd());
+      line = word.trimStart();
+    }
+    // A single word wider than the box is cut by characters.
+    while (line && measure(line, font) > maxW && line.length > 1) {
+      let n = line.length - 1;
+      while (n > 1 && measure(line.slice(0, n), font) > maxW) n--;
+      out.push(line.slice(0, n));
+      line = line.slice(n);
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+function noteBlockFor(t: Topic, fontSize: number, padY: number, contentW: number, measure: Measure): NoteBlock | undefined {
+  const note = t.style?.showNote ? t.note?.trim() : undefined;
+  if (!note) return;
+  const size = Math.max(11, Math.round(fontSize * 0.8));
+  const font = `400 ${size}px ${FONT_FAMILY}`;
+  const maxW = Math.min(NOTE_MAX_W, Math.max(NOTE_MIN_W, contentW));
+  let lines = wrapText(note, font, maxW, measure);
+  if (lines.length > NOTE_MAX_LINES) lines = [...lines.slice(0, NOTE_MAX_LINES - 1), `${lines[NOTE_MAX_LINES - 1]}…`];
+  const lineHeight = Math.round(size * 1.4);
+  return { lines, font, fontSize: size, lineHeight, h: NOTE_GAP + lines.length * lineHeight + padY };
+}
 
 function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, resources?: Record<string, string>) {
   const m = metricsFor(depth, boxed, t);
@@ -108,9 +165,11 @@ function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, res
     image = { href, w: Math.round(t.image.width * k), h: Math.round(t.image.height * k) };
   }
   const imageH = image ? image.h + IMAGE_GAP : 0;
-  const w = Math.max(m.minW, Math.ceil(textW + iconW + m.padX * 2), image ? image.w + m.padX * 2 : 0);
-  const h = Math.max(lines.length * lineHeight, icons ? MARKER_SIZE : 0) + m.padY * 2 + imageH;
-  return { w, h, lines, font, fontSize: m.fontSize, lineHeight, padX: m.padX, shape: m.shape, image, imageH };
+  const noteBlock = noteBlockFor(t, m.fontSize, m.padY, textW + iconW, measure);
+  const noteW = noteBlock ? Math.max(...noteBlock.lines.map((l) => measure(l || ' ', noteBlock.font))) : 0;
+  const w = Math.max(m.minW, Math.ceil(textW + iconW + m.padX * 2), image ? image.w + m.padX * 2 : 0, Math.ceil(noteW + m.padX * 2));
+  const h = Math.max(lines.length * lineHeight, icons ? MARKER_SIZE : 0) + m.padY * 2 + imageH + (noteBlock?.h ?? 0);
+  return { w, h, lines, font, fontSize: m.fontSize, lineHeight, padX: m.padX, shape: m.shape, image, imageH, noteBlock };
 }
 
 const H_GAP = (depth: number) => (depth === 0 ? 64 : 40);

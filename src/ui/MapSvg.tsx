@@ -1,7 +1,7 @@
 // Pure rendering of a laid-out map. Used both by the live canvas and by the
 // SVG/PNG exporters, so what you export is exactly what you see.
 
-import { edgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
+import { NOTE_GAP, edgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
 import { FLAG_COLORS, MARKER_GAP, MARKER_SIZE, PRIORITY_COLORS } from '../core/markers';
 import type { MindMap } from '../core/model';
 import { tint, type Theme } from '../core/themes';
@@ -87,9 +87,12 @@ export function MarkerGlyph({ id, x, y }: { id: string; x: number; y: number }) 
   );
 }
 
-function NoteGlyph({ x, y, color }: { x: number; y: number; color: string }) {
+function NoteGlyph({ x, y, color, note }: { x: number; y: number; color: string; note: string }) {
   return (
-    <g fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" opacity={0.75}>
+    <g fill="none" stroke={color} strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" opacity={0.75} data-note-glyph="" style={{ cursor: 'pointer' }}>
+      <title>{note.length > 400 ? `${note.slice(0, 400)}…` : note}</title>
+      {/* Invisible hit area: the outline alone is a small target. */}
+      <rect x={x} y={y} width={MARKER_SIZE} height={MARKER_SIZE} fill="transparent" stroke="none" />
       <path d={`M${x + 4} ${y + 2}h7l4 4v11H${x + 4}z`} />
       <path d={`M${x + 7} ${y + 10}h5M${x + 7} ${y + 13}h5`} />
     </g>
@@ -120,8 +123,9 @@ export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: T
   const strokeW = b.depth === 1 ? 2 : 1.25;
   const textX = b.padX + markers.length * (MARKER_SIZE + MARKER_GAP);
   const textBlockH = b.lines.length * b.lineHeight;
-  // Text and icons sit in the area below the picture, if there is one.
-  const bodyH = b.h - b.imageH;
+  // Text and icons sit below the picture (if any) and above a shown note.
+  const nb = b.noteBlock;
+  const bodyH = b.h - b.imageH - (nb?.h ?? 0);
   const firstBaseline = b.imageH + (bodyH - textBlockH) / 2 + b.lineHeight / 2 + b.fontSize * 0.35;
   const iconY = b.imageH + (bodyH - MARKER_SIZE) / 2;
   const imgPad = b.image ? Math.min(b.padX, 8) : 0;
@@ -155,7 +159,19 @@ export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: T
           </tspan>
         ))}
       </text>
-      {b.topic.note && <NoteGlyph x={b.w - b.padX - MARKER_SIZE} y={iconY} color={text} />}
+      {nb && (
+        <g>
+          <path d={`M${b.padX} ${b.h - nb.h}H${b.w - b.padX}`} stroke={text} strokeOpacity={0.18} strokeWidth={1} />
+          <text x={b.padX} y={b.h - nb.h + NOTE_GAP + nb.lineHeight / 2 + nb.fontSize * 0.35} fontFamily={FONT} fontSize={nb.fontSize} fill={text} fillOpacity={0.78} data-note-text="">
+            {nb.lines.map((line, i) => (
+              <tspan key={i} x={b.padX} dy={i === 0 ? 0 : nb.lineHeight}>
+                {line || ' '}
+              </tspan>
+            ))}
+          </text>
+        </g>
+      )}
+      {b.topic.note && <NoteGlyph x={b.w - b.padX - MARKER_SIZE} y={iconY} color={text} note={b.topic.note} />}
       {b.topic.href && (
         <LinkGlyph
           x={b.w - b.padX - MARKER_SIZE * (b.topic.note ? 2 : 1) - (b.topic.note ? MARKER_GAP : 0)}

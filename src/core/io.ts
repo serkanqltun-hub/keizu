@@ -18,9 +18,13 @@ export function fromJSON(text: string): MindMap {
   return normalizeMap(data);
 }
 
-/** Central topic as a heading, everything else as a nested list. */
+/** Central topic as a heading, everything else as a nested list. Notes are "> " quotes under their topic. */
 export function toMarkdown(map: MindMap): string {
   const out: string[] = [`# ${map.roots[0].text.replace(/\n/g, ' ')}`, ''];
+  const rootNote = (t: Topic) => {
+    if (t.note) out.push(...t.note.split('\n').map((l) => `> ${l}`), '');
+  };
+  rootNote(map.roots[0]);
   const walk = (t: Topic, depth: number) => {
     const pad = '  '.repeat(depth);
     out.push(`${pad}- ${t.text.replace(/\n/g, ' ')}`);
@@ -31,6 +35,7 @@ export function toMarkdown(map: MindMap): string {
   // Floating topics follow as their own sections.
   for (const r of map.roots.slice(1)) {
     out.push('', `## ${r.text.replace(/\n/g, ' ')}`, '');
+    rootNote(r);
     r.children.forEach((c) => walk(c, 0));
   }
   return out.join('\n') + '\n';
@@ -99,6 +104,15 @@ export function emptyMap(main: Topic, roots: Topic[] = [main]): MindMap {
   };
 }
 
+function trimNotes(t: Topic) {
+  if (t.note !== undefined) {
+    const n = t.note.replace(/^\n+|\n+$/g, '');
+    if (n.trim()) t.note = n;
+    else delete t.note;
+  }
+  t.children.forEach(trimNotes);
+}
+
 /** Parses a heading plus nested "-" / "*" / "1." list back into a map. */
 export function fromMarkdown(text: string, fallbackTitle = 'İçe aktarılan'): MindMap {
   const lines = text.split(/\r?\n/);
@@ -106,28 +120,45 @@ export function fromMarkdown(text: string, fallbackTitle = 'İçe aktarılan'): 
   const roots: Topic[] = [main];
   let mainNamed = false;
   let stack: { indent: number; topic: Topic }[] = [{ indent: -1, topic: main }];
+  // "> " lines are the note of the topic just above them.
+  let noteFor: Topic | undefined;
   for (const raw of lines) {
+    const q = /^\s*>\s?(.*)$/.exec(raw);
+    if (q) {
+      const target = noteFor ?? stack[stack.length - 1].topic;
+      target.note = target.note === undefined ? q[1] : `${target.note}\n${q[1]}`;
+      noteFor = target;
+      continue;
+    }
     const h = /^(#{1,6})\s+(.*)$/.exec(raw);
     if (h) {
       const title = h[2].trim();
       if (!mainNamed && main.children.length === 0) {
         main.text = title;
         mainNamed = true;
+        noteFor = main;
         continue;
       }
       // Later headings become free-floating topics.
       const floating = createTopic(title);
       roots.push(floating);
       stack = [{ indent: -1, topic: floating }];
+      noteFor = floating;
       continue;
     }
     const m = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/.exec(raw);
-    if (!m) continue;
+    if (!m) {
+      // Any other text ends the note.
+      if (raw.trim() && noteFor) noteFor = undefined;
+      continue;
+    }
     const indent = m[1].replace(/\t/g, '  ').length;
     const topic = createTopic(m[2].trim());
     while (stack.length > 1 && stack[stack.length - 1].indent >= indent) stack.pop();
     stack[stack.length - 1].topic.children.push(topic);
     stack.push({ indent, topic });
+    noteFor = topic;
   }
+  for (const r of roots) trimNotes(r);
   return emptyMap(main, roots);
 }

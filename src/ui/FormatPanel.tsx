@@ -220,6 +220,12 @@ function TopicSection({
             onKeyDown={(e) => e.stopPropagation()}
           />
         </label>
+        {!!topic.note?.trim() && (
+          <label className="check">
+            <span>{t('note.showInTopic')}</span>
+            <input type="checkbox" checked={!!s.showNote} onChange={(e) => onStyle({ showNote: e.target.checked || undefined })} />
+          </label>
+        )}
       </section>
 
       <section>
