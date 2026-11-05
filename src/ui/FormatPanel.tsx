@@ -334,6 +334,7 @@ function RelationSection({ relation, onLabel, onDelete }: { relation: Relation; 
       <label className="field">
         <span className="muted">{t('panel.label2')}</span>
         <input
+          id="relation-label"
           className="text-input"
           value={label}
           placeholder={t('panel.relationPlaceholder')}
