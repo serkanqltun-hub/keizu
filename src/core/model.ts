@@ -106,9 +106,9 @@ export function createMap(title = 'Yeni harita', mainLabel = 'Ana konu'): MindMa
     title,
     version: 0,
     updatedAt: new Date().toISOString(),
-    theme: 'fresh',
+    theme: 'imza',
     layout: 'mindmap',
-    branchStyle: 'curve',
+    branchStyle: 'elbow',
     multicolor: true,
     relations: [],
     roots: [

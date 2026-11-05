@@ -4,7 +4,7 @@
 import { NOTE_GAP, edgeShape, relationPath, type MapLayout, type NodeBox } from '../core/layout';
 import { FLAG_COLORS, MARKER_GAP, MARKER_SIZE, PRIORITY_COLORS } from '../core/markers';
 import type { MindMap } from '../core/model';
-import { tint, type Theme } from '../core/themes';
+import { deepen, tint, type Theme } from '../core/themes';
 import { visibleIn, type Rect } from '../core/viewport';
 
 export const SELECT_COLOR = '#4C5FD5';
@@ -22,7 +22,13 @@ export function nodeColors(b: NodeBox, theme: Theme) {
   let fill: string;
   if (b.depth === 0) fill = s.fill ?? theme.centralFill;
   else if (b.shape === 'underline' || b.shape === 'none') fill = s.fill ?? 'transparent';
-  else if (b.depth === 1) fill = s.fill ?? tint(b.color, theme.dark);
+  else if (theme.signature) {
+    // Main topics in their branch colour, deeper ones in a light tint of it.
+    if (b.depth === 1) fill = s.fill ?? b.color;
+    else fill = s.fill ?? tint(b.color, theme.dark, theme.dark ? 0.2 : 0.12);
+    const auto = b.depth >= 2 && !s.fill ? deepen(b.color, theme.dark) : isDark(fill) ? '#FFFFFF' : '#14181E';
+    return { fill, text: s.textColor ?? (fill === 'transparent' ? theme.text : auto) };
+  } else if (b.depth === 1) fill = s.fill ?? tint(b.color, theme.dark);
   else fill = s.fill ?? (theme.dark ? '#1C222A' : '#FFFFFF');
   const text = s.textColor ?? (fill === 'transparent' ? theme.text : isDark(fill) ? '#FFFFFF' : '#1D232B');
   return { fill, text };
@@ -114,14 +120,18 @@ function LinkGlyph({ x, y, color, internal }: { x: number; y: number; color: str
   );
 }
 
-export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: Theme; selected?: boolean; dimmed?: boolean }) {
+export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: NodeBox; theme: Theme; selected?: boolean; dimmed?: boolean; opacity?: number }) {
   const { fill, text } = nodeColors(b, theme);
   const s = b.topic.style ?? {};
   const markers = b.topic.markers ?? [];
-  const rx = b.shape === 'pill' ? b.h / 2 : b.shape === 'rect' ? 3 : b.depth === 0 ? 14 : b.depth === 1 ? 10 : 7;
-  const stroke = b.depth === 0 || b.shape === 'underline' || b.shape === 'none' ? 'none' : b.color;
+  const sig = !!theme.signature;
+  const rx = b.shape === 'pill' ? b.h / 2 : b.shape === 'rect' ? 3 : b.depth === 0 ? (sig ? 12 : 14) : b.depth === 1 ? (sig ? 9 : 10) : 7;
+  // Signature topics are filled, so they need no outline unless the user set a fill of their own.
+  const stroke = b.depth === 0 || b.shape === 'underline' || b.shape === 'none' || (sig && !s.fill) ? 'none' : b.color;
   const strokeW = b.depth === 1 ? 2 : 1.25;
-  const textX = b.padX + markers.length * (MARKER_SIZE + MARKER_GAP);
+  const lead = b.lead ?? 0;
+  const textX = b.padX + lead + markers.length * (MARKER_SIZE + MARKER_GAP);
+  const selColor = sig ? theme.text : SELECT_COLOR;
   const textBlockH = b.lines.length * b.lineHeight;
   // Text and icons sit below the picture (if any) and above a shown note.
   const nb = b.noteBlock;
@@ -132,17 +142,27 @@ export function TopicView({ b, theme, selected, dimmed }: { b: NodeBox; theme: T
   const weight = /(\d{3})/.exec(b.font)?.[1] ?? '400';
 
   return (
-    <g transform={`translate(${b.x - b.w / 2} ${b.y - b.h / 2})`} opacity={dimmed ? 0.35 : 1} data-topic-id={b.id}>
+    <g transform={`translate(${b.x - b.w / 2} ${b.y - b.h / 2})`} opacity={(dimmed ? 0.35 : 1) * opacity} data-topic-id={b.id}>
       {selected && (
-        <rect x={-4} y={-4} width={b.w + 8} height={b.h + 8} rx={rx + 3} fill="none" stroke={SELECT_COLOR} strokeWidth={2} />
+        <rect x={-4} y={-4} width={b.w + 8} height={b.h + 8} rx={rx + 3} fill="none" stroke={selColor} strokeWidth={sig ? 1.5 : 2} data-selection="" />
+      )}
+      {selected && sig && (
+        <g fill={theme.canvas} stroke={selColor} strokeWidth={1.5}>
+          <circle cx={-4} cy={b.h / 2} r={4} />
+          <circle cx={b.w + 4} cy={b.h / 2} r={4} />
+        </g>
       )}
       <rect width={b.w} height={b.h} rx={rx} fill={fill} stroke={stroke} strokeWidth={stroke === 'none' ? 0 : strokeW} />
+      {sig && b.depth === 0 && theme.rootDot && <circle cx={b.w - 12} cy={b.h - 12} r={3.5} fill={theme.rootDot} data-root-dot="" />}
+      {lead > 0 && (
+        <circle cx={b.padX + 3.5} cy={b.imageH + (b.h - b.imageH - (b.noteBlock?.h ?? 0)) / 2} r={b.depth === 1 ? 4 : 3} fill={b.depth === 1 && !s.fill ? text : b.color} data-lead-dot="" />
+      )}
       {b.shape === 'underline' && <path d={`M0 ${b.h}H${b.w}`} stroke={b.color} strokeWidth={1.5} strokeLinecap="round" />}
       {b.image && (
         <image href={b.image.href} x={(b.w - b.image.w) / 2} y={imgPad} width={b.image.w} height={b.image.h - imgPad} preserveAspectRatio="xMidYMid meet" />
       )}
       {markers.map((m, i) => (
-        <MarkerGlyph key={m} id={m} x={b.padX + i * (MARKER_SIZE + MARKER_GAP)} y={iconY} />
+        <MarkerGlyph key={m} id={m} x={b.padX + lead + i * (MARKER_SIZE + MARKER_GAP)} y={iconY} />
       ))}
       <text
         x={textX}
@@ -218,15 +238,22 @@ function Relations({ map, layout, theme, selectedRelId }: { map: MindMap; layout
         if (!a || !b) return null; // hidden inside a collapsed branch
         const { d, mid } = relationPath(a, b);
         const on = r.id === selectedRelId;
-        const color = on ? SELECT_COLOR : base;
+        const color = on ? SELECT_COLOR : theme.signature ? b.color : base;
         const labelW = r.label ? r.label.length * 6.4 + 16 : 0;
         return (
           <g key={r.id} data-relation-id={r.id} style={{ cursor: 'pointer' }}>
             <path d={d} fill="none" stroke="transparent" strokeWidth={14} />
-            <path d={d} fill="none" stroke={color} strokeWidth={on ? 2 : 1.5} strokeDasharray="6 4" markerEnd={`url(#${on ? 'kz-rel-on' : 'kz-rel'})`} />
+            {theme.signature && !on && (
+              <defs>
+                <marker id={`kz-rel-${r.id}`} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0 0L10 5L0 10z" fill={color} />
+                </marker>
+              </defs>
+            )}
+            <path d={d} fill="none" stroke={color} strokeWidth={on ? 2 : 1.5} strokeDasharray="6 4" markerEnd={`url(#${on ? 'kz-rel-on' : theme.signature ? `kz-rel-${r.id}` : 'kz-rel'})`} />
             {r.label && (
               <g>
-                <rect x={mid.x - labelW / 2} y={mid.y - 11} width={labelW} height={22} rx={6} fill={theme.dark ? '#1C222A' : '#FFFFFF'} stroke={on ? SELECT_COLOR : theme.grid} />
+                <rect x={mid.x - labelW / 2} y={mid.y - 11} width={labelW} height={22} rx={theme.signature ? 11 : 6} fill={theme.dark ? '#1C222A' : '#FFFFFF'} stroke={on ? SELECT_COLOR : theme.signature ? color : theme.grid} />
                 <text x={mid.x} y={mid.y + 4} textAnchor="middle" fontSize={11} fill={theme.text} fontFamily="'Plus Jakarta Sans', system-ui, sans-serif">
                   {r.label}
                 </text>
@@ -274,9 +301,11 @@ interface MapSvgProps {
   viewport?: Rect;
   /** Zoomed far out on a big map: plain shapes, no text, few DOM nodes. */
   simple?: boolean;
+  /** Topics fading in or out during a layout change, by id. */
+  fade?: Map<string, number>;
 }
 
-export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, viewport, simple }: MapSvgProps) {
+export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, viewport, simple, fade }: MapSvgProps) {
   const vis = visibleIn(layout, viewport);
   if (simple) return <SimpleMap map={map} layout={layout} theme={theme} nodes={vis.nodes} edges={vis.edges} selectedId={selectedId} />;
   return (
@@ -286,12 +315,14 @@ export function MapSvg({ map, layout, theme, selectedId, selectedRelId, dimIds, 
           if (c.noEdge) return null;
           const p = layout.byId.get(c.parentId!)!;
           const { d } = edgeShape(p, c, map.branchStyle);
-          return <path key={c.id} d={d} stroke={c.color} strokeWidth={c.depth === 1 || p.flow === 'fishbone' ? 2.5 : 1.5} opacity={dimIds?.has(c.id) ? 0.35 : 1} />;
+          const main = c.depth === 1 || p.flow === 'fishbone';
+          const width = theme.signature ? (main ? 1.8 : 1.3) : main ? 2.5 : 1.5;
+          return <path key={c.id} d={d} stroke={c.color} strokeWidth={width} strokeLinejoin="round" opacity={(dimIds?.has(c.id) ? 0.35 : 1) * (fade?.get(c.id) ?? 1)} />;
         })}
       </g>
       <LinkLabels map={map} layout={layout} edges={vis.edges} theme={theme} />
       {vis.nodes.map((b) => (
-        <TopicView key={b.id} b={b} theme={theme} selected={b.id === selectedId} dimmed={dimIds?.has(b.id)} />
+        <TopicView key={b.id} b={b} theme={theme} selected={b.id === selectedId} dimmed={dimIds?.has(b.id)} opacity={fade?.get(b.id) ?? 1} />
       ))}
       {vis.nodes.map((b) => (
         <CollapseBadge key={`c-${b.id}`} b={b} theme={theme} />

@@ -11,9 +11,45 @@ export interface Theme {
   palette: string[];
   /** Branch colour when multicolour is off. */
   mono: string;
+  /**
+   * Keizu's own look: every topic boxed, main topics filled with their branch
+   * colour, deeper topics in a light tint of it with a leading dot, rounded
+   * elbow connectors and a node dot on the central topic.
+   */
+  signature?: boolean;
+  /** The node dot on the central topic (signature themes). */
+  rootDot?: string;
 }
 
 export const THEMES: Theme[] = [
+  {
+    id: 'imza',
+    name: 'İmza',
+    dark: false,
+    canvas: '#F7F9FC',
+    grid: '#D8DCE2',
+    centralFill: '#1F2A37',
+    centralText: '#FFFFFF',
+    text: '#1D232B',
+    palette: ['#3446B8', '#0C7D72', '#B0570A', '#B8326F', '#6A3FB5', '#3D7A2E', '#B42D2D', '#0B6F8A'],
+    mono: '#3446B8',
+    signature: true,
+    rootDot: '#7389FF',
+  },
+  {
+    id: 'imzaNight',
+    name: 'İmza Gece',
+    dark: true,
+    canvas: '#1A1E25',
+    grid: '#2C333D',
+    centralFill: '#232C38',
+    centralText: '#FFFFFF',
+    text: '#EEF0F4',
+    palette: ['#8197FF', '#38C2B4', '#F0A04B', '#EE7AA8', '#B294FF', '#8FD16A', '#FF7B7B', '#5CC8E6'],
+    mono: '#8197FF',
+    signature: true,
+    rootDot: '#8197FF',
+  },
   {
     id: 'fresh',
     name: 'Taze',
@@ -75,6 +111,20 @@ export function tint(hex: string, dark: boolean, amount = dark ? 0.22 : 0.12): s
   const base = dark ? 20 : 255;
   const mix = (c: number) => Math.round(base + (c - base) * amount);
   return `#${[mix(r), mix(g), mix(b)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Mixes a colour toward black (light themes) or white (dark themes): text on a branch tint. */
+export function deepen(hex: string, dark: boolean, amount = dark ? 0.62 : 0.45): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  const target = dark ? 255 : 0;
+  const mix = (c: number) => Math.round(c + (target - c) * amount);
+  return `#${[mix(r), mix(g), mix(b)].map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** The default theme for a new map: İmza, in its dark version on a dark system. */
+export function defaultThemeId(prefersDark: boolean): string {
+  return prefersDark ? 'imzaNight' : 'imza';
 }
 
 export const FILL_SWATCHES = ['#FDEEE6', '#E7F1FA', '#E8F4EB', '#F5EAF8', '#FFF4D6', '#EEF0F3', '#FFFFFF', '#1F2A37'];

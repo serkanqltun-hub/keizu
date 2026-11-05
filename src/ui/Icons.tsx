@@ -108,3 +108,9 @@ export const Lock = ({ size }: P) => (
     <path d="M8 11V8a4 4 0 0 1 8 0v3" />
   </Svg>
 );
+
+export const Folder = ({ size }: P) => (
+  <Svg size={size}>
+    <path d="M4 7h6l2 2h8v10H4z" />
+  </Svg>
+);

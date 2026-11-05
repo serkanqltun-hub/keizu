@@ -10,6 +10,8 @@ import { t } from '../i18n';
 import { MapSvg, SELECT_COLOR, TopicView, nodeColors } from './MapSvg';
 import { canvasMeasure } from './measure';
 import { NotePopover, type NoteSave } from './NotePopover';
+import { getMotionPrefs, isMouseWheel, reducedMotion, wheelZoomFactor } from './motion';
+import { useLayoutMotion } from './useLayoutMotion';
 
 export interface CanvasHandle {
   zoomBy(factor: number): void;
@@ -99,7 +101,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   const [drag, setDrag] = useState<{ id: string; x: number; y: number; target: string | null } | null>(null);
   const [pointer, setPointer] = useState<Point | null>(null);
   const gesture = useRef<
-    | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number }
+    | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; trail: { x: number; y: number; t: number }[] }
     | { kind: 'topic'; id: string; sx: number; sy: number; ox: number; oy: number; dragging: boolean }
     | null
   >(null);
@@ -119,14 +121,102 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     [],
   );
 
-  const fit = useCallback(() => {
+  // ---------- camera: eases toward a target view, and glides after a flick ----------
+  const cam = useRef<{ target: View | null; anchor: Point | null; glide: Point | null; raf: number; last: number }>({
+    target: null,
+    anchor: null,
+    glide: null,
+    raf: 0,
+    last: 0,
+  });
+  const stopCamera = useCallback(() => {
+    const c = cam.current;
+    c.target = null;
+    c.anchor = null;
+    c.glide = null;
+  }, []);
+  const tick = useCallback((now: number) => {
+    const c = cam.current;
+    const dt = Math.min(64, now - c.last);
+    c.last = now;
+    let v = viewRef.current;
+    if (c.glide) {
+      v = { ...v, x: v.x + c.glide.x * dt, y: v.y + c.glide.y * dt };
+      const f = Math.exp(-dt / 260);
+      c.glide = { x: c.glide.x * f, y: c.glide.y * f };
+      if (Math.hypot(c.glide.x, c.glide.y) < 0.02) c.glide = null;
+    }
+    const tg = c.target;
+    if (tg) {
+      const s = 1 - Math.exp(-dt / 70);
+      const k = Math.exp(Math.log(v.k) + (Math.log(tg.k) - Math.log(v.k)) * s);
+      if (c.anchor) {
+        // Keep the map point under the cursor in place at every step.
+        const mx = (c.anchor.x - tg.x) / tg.k, my = (c.anchor.y - tg.y) / tg.k;
+        v = { k, x: c.anchor.x - mx * k, y: c.anchor.y - my * k };
+      } else {
+        v = { k, x: v.x + (tg.x - v.x) * s, y: v.y + (tg.y - v.y) * s };
+      }
+      if (Math.abs(Math.log(tg.k / v.k)) < 1e-3 && Math.abs(tg.x - v.x) < 0.3 && Math.abs(tg.y - v.y) < 0.3) {
+        v = tg;
+        c.target = null;
+        c.anchor = null;
+      }
+    }
+    viewRef.current = v;
+    setView(v);
+    c.raf = c.target || c.glide ? requestAnimationFrame(tick) : 0;
+  }, []);
+  const kick = useCallback(() => {
+    const c = cam.current;
+    if (c.raf) return;
+    c.last = performance.now();
+    c.raf = requestAnimationFrame(tick);
+  }, [tick]);
+  useEffect(() => () => cancelAnimationFrame(cam.current.raf), []);
+
+  /** Moves the camera to a view: eased, or at once when motion is reduced. */
+  const animateTo = useCallback(
+    (v: View, anchor: Point | null = null) => {
+      if (reducedMotion()) {
+        stopCamera();
+        viewRef.current = v;
+        setView(v);
+        return;
+      }
+      cam.current.target = v;
+      cam.current.anchor = anchor;
+      kick();
+    },
+    [kick, stopCamera],
+  );
+
+  /** Zooms by a factor around a point on the canvas (its centre by default), eased. */
+  const zoomAt = useCallback(
+    (f: number, px?: number, py?: number) => {
+      const rect = wrap.current?.getBoundingClientRect();
+      const ax = px ?? (rect ? rect.width / 2 : 0), ay = py ?? (rect ? rect.height / 2 : 0);
+      const base = cam.current.anchor && cam.current.target ? cam.current.target : viewRef.current;
+      const k = clampK(base.k * f);
+      const mx = (ax - base.x) / base.k, my = (ay - base.y) / base.k;
+      animateTo({ k, x: ax - mx * k, y: ay - my * k }, { x: ax, y: ay });
+    },
+    [animateTo],
+  );
+
+  const fitView = useCallback((): View | null => {
     const rect = wrap.current?.getBoundingClientRect();
-    if (!rect) return;
+    if (!rect) return null;
     const { minX, minY, maxX, maxY } = layout.bounds;
     const w = maxX - minX + 120, h = maxY - minY + 120;
     const k = clampK(Math.min(rect.width / w, rect.height / h, 1.2));
-    setView({ k, x: rect.width / 2 - ((minX + maxX) / 2) * k, y: rect.height / 2 - ((minY + maxY) / 2) * k });
+    return { k, x: rect.width / 2 - ((minX + maxX) / 2) * k, y: rect.height / 2 - ((minY + maxY) / 2) * k };
   }, [layout]);
+
+  const fit = useCallback(() => {
+    const v = fitView();
+    if (v) animateTo(v);
+  }, [fitView, animateTo]);
 
   const centerRoot = useCallback(() => {
     const rect = wrap.current?.getBoundingClientRect();
@@ -134,25 +224,36 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     setView((v) => ({ ...v, x: rect.width / 2, y: rect.height / 2 }));
   }, []);
 
-  const centerOn = useCallback(
-    (id: string) => {
+  const centerView = useCallback(
+    (id: string): View | null => {
       const rect = wrap.current?.getBoundingClientRect();
       const b = layout.byId.get(id);
-      if (!rect || !b) return;
-      const k = Math.max(viewRef.current.k, 0.8);
-      setView({ k, x: rect.width / 2 - b.x * k, y: rect.height / 2 - b.y * k });
+      if (!rect || !b) return null;
+      const k = Math.max((cam.current.target ?? viewRef.current).k, 0.8);
+      return { k, x: rect.width / 2 - b.x * k, y: rect.height / 2 - b.y * k };
     },
     [layout],
   );
+  const centerOn = useCallback(
+    (id: string) => {
+      const v = centerView(id);
+      if (v) animateTo(v);
+    },
+    [centerView, animateTo],
+  );
 
-  useImperativeHandle(ref, () => ({ zoomBy: (f) => setZoom(viewRef.current.k * f), fit, centerRoot, centerOn }), [setZoom, fit, centerRoot, centerOn]);
+  useImperativeHandle(ref, () => ({ zoomBy: (f) => zoomAt(f), fit, centerRoot, centerOn }), [zoomAt, fit, centerRoot, centerOn]);
 
-  // Fit the map when it is opened and when its layout kind changes; when
-  // opened from a search, show the found topic instead.
+  // Fit the map when it is opened (at once) and when its layout kind changes
+  // (eased); when opened from a search, show the found topic instead.
   const opened = useRef(false);
   useLayoutEffect(() => {
-    if (!opened.current && props.focusId && props.focusId !== map.roots[0].id) centerOn(props.focusId);
-    else fit();
+    const v = !opened.current && props.focusId && props.focusId !== map.roots[0].id ? centerView(props.focusId) : fitView();
+    if (v && !opened.current) {
+      stopCamera();
+      viewRef.current = v;
+      setView(v);
+    } else if (v) animateTo(v);
     opened.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map.id, map.layout]);
@@ -165,35 +266,50 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     const b = layout.byId.get(selectedId);
     const rect = wrap.current?.getBoundingClientRect();
     if (!b || !rect) return;
-    // Updater form: works on the latest view, even one set by fit() a moment ago.
-    setView((v) => {
-      const sx = b.x * v.k + v.x, sy = b.y * v.k + v.y;
-      const mx = (b.w / 2) * v.k + 40, my = (b.h / 2) * v.k + 40;
-      let dx = 0, dy = 0;
-      if (sx - mx < 0) dx = mx - sx;
-      else if (sx + mx > rect.width) dx = rect.width - sx - mx;
-      if (sy - my < 0) dy = my - sy;
-      else if (sy + my > rect.height) dy = rect.height - sy - my;
-      return dx || dy ? { ...v, x: v.x + dx, y: v.y + dy } : v;
-    });
-  }, [selectedId, layout]);
+    // Works on where the camera is heading, even a fit() started a moment ago.
+    const v = cam.current.target ?? viewRef.current;
+    const sx = b.x * v.k + v.x, sy = b.y * v.k + v.y;
+    const mx = (b.w / 2) * v.k + 40, my = (b.h / 2) * v.k + 40;
+    let dx = 0, dy = 0;
+    if (sx - mx < 0) dx = mx - sx;
+    else if (sx + mx > rect.width) dx = rect.width - sx - mx;
+    if (sy - my < 0) dy = my - sy;
+    else if (sy + my > rect.height) dy = rect.height - sy - my;
+    if (dx || dy) animateTo({ ...v, x: v.x + dx, y: v.y + dy });
+  }, [selectedId, layout]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Wheel: pan, or zoom with Ctrl/⌘ (also what trackpad pinch sends).
+  // Wheel: a mouse wheel zooms toward the cursor (or pans, by setting);
+  // a touchpad pans with two fingers and zooms with a pinch (Ctrl + wheel).
   useEffect(() => {
     const el = wrap.current;
     if (!el) return;
+    let touchpadUntil = 0;
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
       const rect = el.getBoundingClientRect();
+      const px = e.clientX - rect.left, py = e.clientY - rect.top;
       if (e.ctrlKey || e.metaKey) {
-        setZoom(viewRef.current.k * Math.exp(-e.deltaY * 0.0025), e.clientX - rect.left, e.clientY - rect.top);
-      } else {
-        setView((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
+        // Pinch sends many tiny steps: follow them directly.
+        stopCamera();
+        setZoom(viewRef.current.k * wheelZoomFactor(e), px, py);
+        return;
       }
+      const raw = { deltaMode: e.deltaMode, deltaX: e.deltaX, deltaY: e.deltaY, wheelDeltaY: (e as WheelEvent & { wheelDeltaY?: number }).wheelDeltaY };
+      // A touchpad scroll keeps sending events for a while (momentum): stay in pan mode.
+      const mouse = performance.now() > touchpadUntil && isMouseWheel(raw);
+      if (!mouse) touchpadUntil = performance.now() + 300;
+      if (mouse && !e.shiftKey && getMotionPrefs().wheel === 'zoom') {
+        zoomAt(wheelZoomFactor(e), px, py);
+        return;
+      }
+      stopCamera();
+      const lines = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? rect.height : 1;
+      const dx = (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * lines, dy = (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * lines;
+      setView((v) => ({ ...v, x: v.x - dx, y: v.y - dy }));
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, [setZoom]);
+  }, [setZoom, zoomAt, stopCamera]);
 
   const toMap = (clientX: number, clientY: number) => {
     const rect = wrap.current!.getBoundingClientRect();
@@ -265,7 +381,9 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     } else {
       if (editingId) return;
       props.onSelect(null);
-      gesture.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: view.x, vy: view.y };
+      stopCamera();
+      const v0 = viewRef.current;
+      gesture.current = { kind: 'pan', sx: e.clientX, sy: e.clientY, vx: v0.x, vy: v0.y, trail: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
     }
   };
 
@@ -274,6 +392,9 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     const g = gesture.current;
     if (!g) return;
     if (g.kind === 'pan') {
+      const now = performance.now();
+      g.trail.push({ x: e.clientX, y: e.clientY, t: now });
+      while (g.trail.length > 2 && now - g.trail[0].t > 100) g.trail.shift();
       setView((v) => ({ ...v, x: g.vx + e.clientX - g.sx, y: g.vy + e.clientY - g.sy }));
       return;
     }
@@ -292,6 +413,18 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
   const onPointerUp = () => {
     const g = gesture.current;
     gesture.current = null;
+    if (g?.kind === 'pan' && !reducedMotion()) {
+      // A flick keeps the map gliding for a moment.
+      const a = g.trail[0], b = g.trail[g.trail.length - 1];
+      const dt = b.t - a.t;
+      if (dt > 0 && performance.now() - b.t < 60) {
+        const vx = (b.x - a.x) / dt, vy = (b.y - a.y) / dt;
+        if (Math.hypot(vx, vy) > 0.3) {
+          cam.current.glide = { x: vx, y: vy };
+          kick();
+        }
+      }
+    }
     if (g?.kind === 'topic' && g.dragging && drag) {
       // Dropped on a topic: becomes its child. Dropped on empty canvas:
       // becomes (or stays) a free-floating tree at that spot.
@@ -309,6 +442,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     else if (!(e.target as Element).closest('[data-relation-id]')) props.onCreateFloating(toMap(e.clientX, e.clientY));
   };
 
+  const drawn = useLayoutMotion(layout, map.id);
   const dragBox = drag ? layout.byId.get(drag.id) : undefined;
   const targetBox = drag?.target ? layout.byId.get(drag.target) : undefined;
   const editBox = editingId ? layout.byId.get(editingId) : undefined;
@@ -341,7 +475,8 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
           {/* Nothing is drawn until the canvas size (and so the viewport) is known. */}
           {viewport && <MemoMapSvg
             map={map}
-            layout={layout}
+            layout={drawn.layout}
+            fade={drawn.fade}
             theme={theme}
             selectedId={editingId ? undefined : selectedId ?? undefined}
             selectedRelId={props.selectedRelId ?? undefined}
@@ -432,7 +567,8 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
 
   const lines = value.split('\n');
   const textW = Math.max(...lines.map((l) => canvasMeasure(l || ' ', box.font)));
-  const w = Math.max(box.w, textW + box.padX * 2 + 8) * view.k;
+  const lead = box.lead ?? 0;
+  const w = Math.max(box.w, textW + box.padX * 2 + lead + 8) * view.k;
   // The edit box covers the text area only, below any picture.
   const bodyH = box.h - box.imageH - (box.noteBlock?.h ?? 0);
   const padY = (bodyH - box.lineHeight * box.lines.length) / 2;
@@ -478,7 +614,7 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
         font: box.font,
         fontSize: box.fontSize * view.k,
         lineHeight: `${box.lineHeight * view.k}px`,
-        padding: `${padY * view.k}px ${box.padX * view.k}px`,
+        padding: `${padY * view.k}px ${box.padX * view.k}px ${padY * view.k}px ${(box.padX + lead) * view.k}px`,
         color: text,
         background: fill === 'transparent' ? theme.canvas : fill,
         borderRadius: 8 * view.k,

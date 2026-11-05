@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { LayoutKind, MindMap } from '../core/model';
 import { templateMap } from '../core/templates';
+import { defaultThemeId } from '../core/themes';
 import { matchText, searchMap, type TopicHit } from '../core/search';
 import { LANGS, getLang, locale, setLang, t, type Lang } from '../i18n';
 import type { MapStore, MapSummary } from '../sync/types';
@@ -236,6 +237,7 @@ export function Home({ store, onOpen, onOpenShared, onSettings, onOpenFiles, not
       column: t('tpl.column'),
       cell: t('tpl.cell'),
     });
+    map.theme = defaultThemeId(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
     await store.save(map);
     onOpen(map);
   };

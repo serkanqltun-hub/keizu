@@ -45,6 +45,8 @@ export interface NodeBox {
   fontSize: number;
   lineHeight: number;
   padX: number;
+  /** Extra space before the text for the leading dot (signature themes), else 0. */
+  lead: number;
   /** Children hidden by collapsing, 0 when expanded. */
   hidden: number;
   /** No connector is drawn from the parent (matrix cells). */
@@ -85,9 +87,14 @@ interface Metrics {
   shape: TopicShape;
 }
 
-function metricsFor(depth: number, boxed: boolean, t: Topic): Metrics {
-  const base: Metrics =
-    depth === 0
+function metricsFor(depth: number, boxed: boolean, t: Topic, signature = false): Metrics {
+  const base: Metrics = signature
+    ? depth === 0
+      ? { fontSize: 20, weight: 800, padX: 22, padY: 14, minW: 120, shape: 'rounded' }
+      : depth === 1
+        ? { fontSize: 15, weight: 700, padX: 14, padY: 9, minW: 64, shape: 'rounded' }
+        : { fontSize: 14, weight: 600, padX: 11, padY: 6, minW: 24, shape: 'rounded' }
+    : depth === 0
       ? { fontSize: 20, weight: 700, padX: 24, padY: 16, minW: 120, shape: 'rounded' }
       : depth === 1
         ? { fontSize: 15, weight: 600, padX: 16, padY: 9, minW: 64, shape: 'rounded' }
@@ -150,8 +157,13 @@ function noteBlockFor(t: Topic, fontSize: number, padY: number, contentW: number
   return { lines, font, fontSize: size, lineHeight, h: NOTE_GAP + lines.length * lineHeight + padY };
 }
 
-function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, resources?: Record<string, string>) {
-  const m = metricsFor(depth, boxed, t);
+/** Room for the leading dot of signature-theme topics. */
+export const LEAD_DOT = 12;
+
+function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, resources?: Record<string, string>, signature = false) {
+  const m = metricsFor(depth, boxed, t, signature);
+  // Signature themes put a small dot before the text of boxed, non-central topics.
+  const lead = signature && depth > 0 && (m.shape === 'rounded' || m.shape === 'pill' || m.shape === 'rect') ? LEAD_DOT : 0;
   const font = `${t.style?.italic ? 'italic ' : ''}${m.weight} ${m.fontSize}px ${FONT_FAMILY}`;
   const lines = (t.text || ' ').split('\n');
   const textW = Math.max(...lines.map((l) => measure(l || ' ', font)));
@@ -167,9 +179,9 @@ function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, res
   const imageH = image ? image.h + IMAGE_GAP : 0;
   const noteBlock = noteBlockFor(t, m.fontSize, m.padY, textW + iconW, measure);
   const noteW = noteBlock ? Math.max(...noteBlock.lines.map((l) => measure(l || ' ', noteBlock.font))) : 0;
-  const w = Math.max(m.minW, Math.ceil(textW + iconW + m.padX * 2), image ? image.w + m.padX * 2 : 0, Math.ceil(noteW + m.padX * 2));
+  const w = Math.max(m.minW, Math.ceil(textW + iconW + lead + m.padX * 2), image ? image.w + m.padX * 2 : 0, Math.ceil(noteW + m.padX * 2));
   const h = Math.max(lines.length * lineHeight, icons ? MARKER_SIZE : 0) + m.padY * 2 + imageH + (noteBlock?.h ?? 0);
-  return { w, h, lines, font, fontSize: m.fontSize, lineHeight, padX: m.padX, shape: m.shape, image, imageH, noteBlock };
+  return { w, h, lines, font, fontSize: m.fontSize, lineHeight, padX: m.padX, lead, shape: m.shape, image, imageH, noteBlock };
 }
 
 const H_GAP = (depth: number) => (depth === 0 ? 64 : 40);
@@ -205,7 +217,7 @@ export function layoutMap(map: MindMap, measure: Measure): MapLayout {
     // central topic stays visually unique.
     const baseDepth = ri === 0 ? 0 : 1;
     const rootColor = ri === 0 ? theme.mono : palette(colorIndex++);
-    const tree = layoutTree(root, kind, baseDepth, rootColor, palette, theme.mono, measure, map.resources);
+    const tree = layoutTree(root, kind, baseDepth, rootColor, palette, theme.mono, measure, map.resources, theme.signature);
     let pos = root.pos;
     if (!pos && ri > 0) {
       // No stored position: park it under everything laid out so far.
@@ -255,6 +267,7 @@ function layoutTree(
   mono: string,
   measure: Measure,
   resources?: Record<string, string>,
+  signature = false,
 ): { nodes: NodeBox[]; root: NodeBox; minY: number } {
   const nodes: NodeBox[] = [];
   const byId = new Map<string, NodeBox>();
@@ -264,7 +277,7 @@ function layoutTree(
   const build = (t: Topic, depth: number, color: string, inherited: LayoutKind, parentDown: boolean, parentId?: string) => {
     const own = t === root ? kind : t.layout ?? inherited;
     if (t !== root && t.layout) explicit.add(t.id);
-    const size = sizeNode(t, depth, parentDown || BOXED.includes(own), measure, resources);
+    const size = sizeNode(t, depth, signature || parentDown || BOXED.includes(own), measure, resources, signature);
     const hidden = t.collapsed && t.children.length ? countTopics(t) - 1 : 0;
     const box: NodeBox = { id: t.id, rootId: root.id, layout: own, flow: 'right', topic: t, parentId, depth, side: 0, x: 0, y: 0, color, hidden, ...size };
     nodes.push(box);
@@ -504,16 +517,30 @@ export function edgePoints(p: NodeBox, c: NodeBox): { from: Point; to: Point } {
   return { from, to };
 }
 
+/** Corner radius of elbow connectors. */
+const ELBOW_R = 10;
+
 /** Connector path; `vertical` for children placed below their parent. */
 export function edgePath(vertical: boolean, style: 'curve' | 'elbow' | 'straight', a: Point, b: Point): string {
   if (style === 'straight') return `M${a.x} ${a.y}L${b.x} ${b.y}`;
   if (vertical) {
     const my = (a.y + b.y) / 2;
-    if (style === 'elbow') return `M${a.x} ${a.y}V${my}H${b.x}V${b.y}`;
+    if (style === 'elbow') {
+      const dx = b.x - a.x, sy = Math.sign(b.y - a.y) || 1, sx = Math.sign(dx);
+      const r = Math.min(ELBOW_R, Math.abs(dx) / 2, Math.abs(my - a.y));
+      if (r < 0.5) return `M${a.x} ${a.y}V${my}H${b.x}V${b.y}`;
+      return `M${a.x} ${a.y}V${my - sy * r}Q${a.x} ${my} ${a.x + sx * r} ${my}H${b.x - sx * r}Q${b.x} ${my} ${b.x} ${my + sy * r}V${b.y}`;
+    }
     return `M${a.x} ${a.y}C${a.x} ${my} ${b.x} ${my} ${b.x} ${b.y}`;
   }
   const mx = (a.x + b.x) / 2;
-  if (style === 'elbow') return `M${a.x} ${a.y}H${mx}V${b.y}H${b.x}`;
+  if (style === 'elbow') {
+    // Rounded corners, never wider than half of either leg.
+    const dy = b.y - a.y, sx = Math.sign(b.x - a.x) || 1, sy = Math.sign(dy);
+    const r = Math.min(ELBOW_R, Math.abs(dy) / 2, Math.abs(mx - a.x));
+    if (r < 0.5) return `M${a.x} ${a.y}H${mx}V${b.y}H${b.x}`;
+    return `M${a.x} ${a.y}H${mx - sx * r}Q${mx} ${a.y} ${mx} ${a.y + sy * r}V${b.y - sy * r}Q${mx} ${b.y} ${mx + sx * r} ${b.y}H${b.x}`;
+  }
   return `M${a.x} ${a.y}C${mx} ${a.y} ${mx} ${b.y} ${b.x} ${b.y}`;
 }
 
