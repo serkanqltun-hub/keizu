@@ -98,6 +98,22 @@ interface Props {
   shared?: SharedRef;
 }
 
+function readPref(key: string, fallback: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    return v === null ? fallback : v === '1';
+  } catch {
+    return fallback;
+  }
+}
+function writePref(key: string, v: boolean) {
+  try {
+    localStorage.setItem(key, v ? '1' : '0');
+  } catch {
+    /* private mode: not remembered */
+  }
+}
+
 export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap, shared }: Props) {
   const [hist, setHist] = useState<History<MindMap>>(() => initHistory(focusId ? revealTopic(initial, focusId) : initial));
   const map = hist.present;
@@ -109,6 +125,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editSeed, setEditSeed] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
+  const [outlineOpen, setOutlineOpenState] = useState(() => readPref('kz.outlinePanel', window.innerWidth >= 1280));
+  const setOutlineOpen = (v: boolean) => {
+    setOutlineOpenState(v);
+    writePref('kz.outlinePanel', v);
+  };
   const [panelTab, setPanelTab] = useState<'style' | 'map'>('style');
   const [zoom, setZoom] = useState(1);
   const [saved, setSaved] = useState<'saved' | 'saving'>('saved');
@@ -570,15 +591,75 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   // What the selected branch would use without its own layout setting.
   const parentBox = selectedId ? layout.byId.get(layout.byId.get(selectedId)?.parentId ?? '') : undefined;
   const inheritedLayout = parentBox?.layout ?? map.layout;
+  const colorOf = (id: string) => {
+    const b = layout.byId.get(id);
+    if (b) return b.color;
+    // Hidden in a collapsed branch on the map: use the nearest shown ancestor.
+    for (let p = findParent(map, id); p; p = findParent(map, p.id)) {
+      const pb = layout.byId.get(p.id);
+      if (pb) return pb.color;
+    }
+    return theme.mono;
+  };
+  const shareAvail = !shared && sync.canShare();
 
   return (
     <div className={`editor ${theme.dark ? 'dark-map' : ''}`}>
+      <div className="ed-body">
+      <nav className="rail" aria-label={t('rail.label')}>
+        <button className="rail-logo" aria-label={t('editor.back')} title={t('editor.back')} onClick={onBack}>
+          <I.Logo size={34} />
+        </button>
+        <button className="rb" aria-label={t('rail.library')} title={t('rail.library')} onClick={onBack}><I.Folder size={20} /></button>
+        <button
+          className={`rb ${view === 'outline' || outlineOpen ? 'on' : ''}`}
+          aria-label={view === 'outline' ? t('view.map') : t('rail.outline')}
+          aria-pressed={view === 'outline' || outlineOpen}
+          title={view === 'outline' ? tip('toggleOutline', t('view.map')) : t('rail.outline')}
+          onClick={() => (view === 'outline' ? switchView('map') : setOutlineOpen(!outlineOpen))}
+        >
+          {view === 'outline' ? <I.MapIcon size={20} /> : <I.OutlineIcon size={20} />}
+        </button>
+        <button className={`rb ${paletteOpen ? 'on' : ''}`} aria-label={cmdLabel('palette')} title={tip('palette')} onClick={() => setPaletteOpen(true)}><I.Search size={20} /></button>
+        {!shared && <button className={`rb ${historyOpen ? 'on' : ''}`} aria-label={cmdLabel('history')} aria-pressed={historyOpen} title={tip('history')} onClick={() => setHistoryOpen((v) => !v)}><I.History size={20} /></button>}
+        <span className="rail-gap" />
+        <button className="rb" aria-label={cmdLabel('shortcuts')} title={tip('shortcuts')} onClick={() => setKeysOpen(true)}><I.Keyboard size={20} /></button>
+      </nav>
+      {outlineOpen && view === 'map' && (
+        <aside className="outline-panel" aria-label={t('view.outline')}>
+          <div className="op-head">
+            <span>{t('view.outline')}</span>
+            <button className="ib" aria-label={t('rail.outlineFull')} title={tip('toggleOutline', t('rail.outlineFull'))} onClick={() => switchView('outline')}><I.Export size={15} /></button>
+          </div>
+          <div className="op-body">
+            <OutlineView
+              map={map}
+              selectedId={selectedId}
+              editingId={null}
+              editSeed={null}
+              colorOf={colorOf}
+              onSelect={(id) => {
+                selectTopic(id);
+                canvas.current?.centerOn(id);
+              }}
+              onStartEdit={(id) => {
+                selectTopic(id);
+                startEdit(id);
+              }}
+              onCommitEdit={commitEdit}
+              onCancelEdit={cancelEdit}
+              onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
+            />
+          </div>
+          <button className="op-foot" onClick={() => setPaletteOpen(true)}>
+            <span>{cmdLabel('palette')}</span>
+            {keymap.palette[0] && <kbd>{fmt(keymap.palette[0])}</kbd>}
+          </button>
+        </aside>
+      )}
+      <div className="ed-main">
       <header className="topbar">
         <div className="tb-left">
-          <button className="ib" aria-label={t('editor.back')} title={t('editor.back')} onClick={onBack}>
-            <I.Menu size={20} />
-          </button>
-          <div className="logo-mark"><I.Logo size={28} /></div>
           <div className="doc-title">
             <span className="name">{map.title}</span>
             {shared ? (
@@ -598,25 +679,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               </span>
             )
             )}
-            {live.state !== 'off' && (
-              <span className={`live-badge ${live.state}`} title={t(`live.state.${live.state}`)}>
-                <span className="dot" /> {t(`live.state.${live.state}`)}
-              </span>
-            )}
           </div>
           <div className="tb-group">
             <button className="ib" aria-label={cmdLabel('undo')} title={tip('undo')} disabled={!commands.undo.enabled} onClick={actions.undo}><I.Undo /></button>
             <button className="ib" aria-label={cmdLabel('redo')} title={tip('redo')} disabled={!commands.redo.enabled} onClick={actions.redo}><I.Redo /></button>
           </div>
-          <div className="seg view-switch" role="group" aria-label={t('view.label')}>
-            <button className={view === 'map' ? 'on' : ''} aria-pressed={view === 'map'} title={tip('toggleOutline', t('view.map'))} onClick={() => switchView('map')}>
-              <I.MapIcon size={16} /><span>{t('view.map')}</span>
-            </button>
-            <button className={view === 'outline' ? 'on' : ''} aria-pressed={view === 'outline'} title={tip('toggleOutline', t('view.outline'))} onClick={() => switchView('outline')}>
-              <I.OutlineIcon size={16} /><span>{t('view.outline')}</span>
-            </button>
-          </div>
-          <button className="ib" aria-label={cmdLabel('palette')} title={tip('palette')} onClick={() => setPaletteOpen(true)}><I.Command /></button>
         </div>
 
         {readOnly ? (
@@ -647,6 +714,14 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           />
           <button className="tb" title={tip('collapse')} disabled={!selected?.children.length || selectedId === mainId} onClick={actions.collapse}><I.Collapse />{t('tb.collapse')}</button>
           <button className="tb" title={tip('remove')} disabled={!selectedRelId && (!selectedId || selectedId === mainId)} onClick={actions.remove}><I.Trash />{t('tb.delete')}</button>
+          <span className="tb-sep" />
+          <div className="seg-tabs layout-switch" role="group" aria-label={t('layout.switch')}>
+            {(['mindmap', 'logic', 'org'] as const).map((k) => (
+              <button key={k} className={map.layout === k ? 'on' : ''} aria-pressed={map.layout === k} title={layoutName(k)} onClick={() => map.layout !== k && commit(setMapProps(map, { layout: k }))}>
+                {t(`layout.short.${k}`)}
+              </button>
+            ))}
+          </div>
         </nav>
         )}
 
@@ -667,14 +742,9 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               {live.peers.length > 5 && <span className="avatar more">+{live.peers.length - 5}</span>}
             </div>
           )}
-          {!shared && sync.canShare() && (
-            <button className={`ib ${shareOpen ? 'on' : ''}`} aria-label={t('share.button')} title={tip('share', t('share.title'))} onClick={() => setShareOpen(true)}>
-              <I.Share />
-            </button>
-          )}
           {!shared && (
           <button
-            className={`btn ${link ? '' : 'primary'}`}
+            className={`btn ${link || shareAvail ? '' : 'primary'}`}
             title={link ? `${t('file.saveToTip', { name: link.name })} (${fmt(keymap.save[0] ?? 'Mod+S')})` : tip('save', t('file.saveTip'))}
             onClick={() => saveToFile()}
           >
@@ -705,8 +775,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
             )}
           </div>
           <button className="ib" aria-label={cmdLabel('present')} title={tip('present')} onClick={() => setPresenting(true)}><I.Present /></button>
-          {!shared && <button className={`ib ${historyOpen ? 'on' : ''}`} aria-label={cmdLabel('history')} aria-pressed={historyOpen} title={tip('history')} onClick={() => setHistoryOpen((v) => !v)}><I.History /></button>}
-          <button className="ib" aria-label={cmdLabel('shortcuts')} title={tip('shortcuts')} onClick={() => setKeysOpen(true)}><I.Keyboard /></button>
+          {shareAvail && (
+            <button className="btn primary" title={tip('share', t('share.title'))} onClick={() => setShareOpen(true)}>
+              <I.Share size={16} /> {t('share.button')}
+            </button>
+          )}
           <button className={`ib ${panelOpen ? 'on' : ''}`} aria-label={cmdLabel('panel')} aria-pressed={panelOpen} title={tip('panel')} onClick={() => setPanelOpen((v) => !v)}><I.Panel /></button>
         </div>
       </header>
@@ -766,16 +839,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               selectedId={selectedId}
               editingId={editingId}
               editSeed={editSeed}
-              colorOf={(id) => {
-                const b = layout.byId.get(id);
-                if (b) return b.color;
-                // Hidden in a collapsed branch on the map: use the nearest shown ancestor.
-                for (let p = findParent(map, id); p; p = findParent(map, p.id)) {
-                  const pb = layout.byId.get(p.id);
-                  if (pb) return pb.color;
-                }
-                return theme.mono;
-              }}
+              colorOf={colorOf}
               onSelect={selectTopic}
               onStartEdit={(id) => startEdit(id)}
               onCommitEdit={commitEdit}
@@ -783,7 +847,6 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onToggleCollapse={(id) => commit(toggleCollapse(map, id))}
             />
           )}
-          <div className="chip stats">{t('editor.stats', { n: countAll(map), layout: layoutName(map.layout) })}</div>
           {view === 'map' && (
             <div className="zoom">
               <button className="ib" aria-label={cmdLabel('zoomOut')} title={tip('zoomOut')} onClick={() => canvas.current?.zoomBy(1 / 1.2)}><I.Minus size={16} /></button>
@@ -795,6 +858,19 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           )}
           {toast && <div className="toast" role="status">{toast}</div>}
         </main>
+      </div>
+      <footer className="statusbar">
+        <span className={`sb-live ${live.state}`} title={live.state !== 'off' ? t(`live.state.${live.state}`) : undefined}>
+          <span className="dot" />
+          {live.state !== 'off' ? t(`live.state.${live.state}`) : t('status.local')}
+        </span>
+        <span>{t('status.topics', { n: countAll(map) })}</span>
+        <span>{t('status.relations', { n: map.relations.length })}</span>
+        {live.peers.length > 0 && <span>{t('live.peers', { n: live.peers.length })}</span>}
+        <span>{layoutName(map.layout)}</span>
+        <button className="sb-lang" title={t('status.lang')} onClick={() => commands.language.run()}>{getLang().toUpperCase()}</button>
+      </footer>
+      </div>
 
         {historyOpen && (
           <VersionPanel

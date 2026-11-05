@@ -386,3 +386,41 @@ mark { background: color-mix(in srgb, #ffd43b 55%, transparent); color: inherit;
 .public-view.empty { height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--muted); }
 /* Narrower windows: toolbar buttons keep their icons and tooltips, not their labels. */
 @media (max-width: 1360px) { .tb-center .tb { min-width: 38px; font-size: 0; gap: 0; } }
+
+/* Signature layout (concept D): icon rail, outline panel, toolbar, status bar */
+.ed-body { flex: 1; display: flex; min-height: 0; }
+.ed-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.rail { width: 64px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 12px 0; background: var(--surface); border-right: 1px solid var(--line); }
+.rail-logo { display: flex; padding: 0; margin-bottom: 10px; border: 0; border-radius: 10px; background: none; }
+.rb { width: 44px; height: 44px; display: grid; place-items: center; border: 0; border-radius: 10px; background: transparent; color: var(--muted); }
+.rb:hover:not(:disabled) { background: var(--soft); color: var(--ink); }
+.rb.on { background: var(--accent-soft); color: var(--accent); }
+.rail-gap { flex: 1; }
+.outline-panel { width: 248px; flex: none; display: flex; flex-direction: column; background: var(--surface); border-right: 1px solid var(--line); }
+.op-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 10px 4px 20px; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.op-body { flex: 1; position: relative; min-height: 0; }
+.outline-panel .outline { padding: 0 8px; }
+.outline-panel .o-row { font-size: 13px; }
+.op-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 10px; padding: 12px 10px; border: 0; border-top: 1px solid var(--line); background: transparent; font-size: 12px; color: var(--muted); }
+.op-foot:hover { color: var(--ink); }
+.topbar .tb { flex-direction: row; min-width: 36px; height: 36px; padding: 0 9px; gap: 0; font-size: 0; }
+.tb-sep { width: 1px; height: 20px; margin: 0 6px; align-self: center; background: var(--line); }
+.layout-switch { align-self: center; padding: 3px; border-radius: 8px; }
+.layout-switch button { height: 30px; padding: 0 10px; border-radius: 6px; font-size: 12px; }
+.statusbar { height: 30px; flex: none; display: flex; align-items: center; gap: 18px; padding: 0 14px; font: 400 11px 'JetBrains Mono', ui-monospace, monospace; color: var(--muted); background: var(--surface); border-top: 1px solid var(--line); white-space: nowrap; overflow: hidden; }
+.sb-live { display: flex; align-items: center; gap: 6px; }
+.sb-live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.sb-live.connecting .dot, .sb-live.offline .dot { background: #e67700; }
+.sb-live.closed .dot { background: var(--muted); }
+.sb-lang { margin-left: auto; padding: 2px 6px; border: 0; border-radius: 4px; background: transparent; font: inherit; color: inherit; }
+.sb-lang:hover { background: var(--soft); color: var(--ink); }
+.canvas-area { background: var(--canvas); }
+@media (max-width: 1100px) { .outline-panel { display: none; } }
+@media (max-width: 720px) { .rail { display: none; } .statusbar span:nth-child(n + 3) { display: none; } }
+.topbar { flex-wrap: nowrap; min-height: 52px; }
+.topbar .tb-left { flex: 1 1 auto; }
+.topbar .tb-center { flex: 0 1 auto; flex-wrap: nowrap; min-width: 0; overflow: hidden; }
+.topbar .tb-right { flex: none; }
+@media (max-width: 1600px) { .topbar .tb-right .btn { font-size: 0; gap: 0; padding: 0 10px; } .layout-switch, .layout-switch + .tb-sep, .tb-sep:has(+ .layout-switch) { display: none; } }
+@media (max-width: 900px) { .topbar { flex-wrap: wrap; } .topbar .tb-center { flex-wrap: wrap; } }
+.topbar .doc-title { max-width: 200px; }

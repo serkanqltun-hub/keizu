@@ -93,6 +93,18 @@ export const en: Record<MessageKey, string> = {
 
   'key.space': 'Space',
 
+  'rail.label': 'Main menu',
+  'rail.library': 'Library',
+  'rail.outline': 'Outline panel',
+  'rail.outlineFull': 'Open the outline full size',
+  'status.local': 'On this device',
+  'status.topics': '{n} topics',
+  'status.relations': '{n} relations',
+  'status.lang': 'Change language',
+  'layout.switch': 'Layout',
+  'layout.short.mindmap': 'Mind',
+  'layout.short.logic': 'Logic',
+  'layout.short.org': 'Org',
   'editor.back': 'Back to maps',
   'editor.insert': 'Insert',
   'editor.stats': '{n} topic · {layout}|{n} topics · {layout}',
