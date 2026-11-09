@@ -106,6 +106,7 @@ export const tr = {
   'cmd.aiIdeas': "Asistan: fikir üret",
   'cmd.aiExpand': "Asistan: dalı genişlet",
   'cmd.aiSummarize': "Asistan: dalı özetle",
+  'cmd.aiNextSteps': "Asistan: sıradaki adımlar",
   'tb.assistant': "Asistan",
   'ctx.assistant': "Asistan",
   'cmd.tag': "Etiket ekle",

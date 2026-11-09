@@ -18,7 +18,9 @@ import {
   type AiAddition,
   type AiReply,
   type AiTopic,
+  type ChatTurn,
 } from '../core/ai';
+import { today } from '../core/tasks';
 import { findTopic, type MindMap } from '../core/model';
 import { getLang, useLang } from '../i18n';
 import * as I from './Icons';
@@ -61,11 +63,11 @@ const STRINGS = {
     copied: 'Kopyalandı',
     advanced: 'Gelişmiş: aracın yolu',
     pathHint: 'Boş bırakırsan Keizu kendisi bulur.',
-    privacy: 'Asistanı kullandığında yalnızca seçili dalın metni seçtiğin araca gönderilir.',
+    privacy: 'Asistanı kullandığında bu haritanın metni (notlar ve görevler dahil) seçtiğin araca gönderilir. Başka haritalar gönderilmez.',
     // panel
     panelTitle: 'Asistan',
     pick: 'Önce haritada bir konu seç.',
-    on: 'Seçili konu: {name}',
+    on: 'Odak: {name}',
     ideas: 'Fikir üret',
     expand: 'Dalı genişlet',
     summarize: 'Özetle',
@@ -73,8 +75,13 @@ const STRINGS = {
     translateTr: 'Türkçeye çevir',
     translateEn: 'İngilizceye çevir',
     fromNote: 'Nottan dallar',
+    nextSteps: 'Sıradaki adımlar',
+    nextStepsHint: 'Tüm haritaya, görevlere ve tarihlere bakıp eksikleri ve sıradaki adımları önerir.',
     ask: 'Sor',
-    askPlaceholder: 'Bu dal hakkında bir şey sor… (ör. "Ne eksik?")',
+    askPlaceholder: 'Haritaya bir şey sor… (ör. "Sıradaki adım ne?")',
+    you: 'Sen',
+    newChat: 'Yeni sohbet',
+    taskTag: 'görev',
     thinking: '{who} düşünüyor…',
     cancel: 'İptal',
     suggestions: '{n} öneri',
@@ -127,10 +134,10 @@ const STRINGS = {
     copied: 'Copied',
     advanced: "Advanced: the tool's path",
     pathHint: 'Leave empty and Keizu finds it.',
-    privacy: 'When you use the assistant, only the text of the selected branch goes to the tool you chose.',
+    privacy: "When you use the assistant, this map's text (notes and tasks included) goes to the tool you chose. Other maps are not sent.",
     panelTitle: 'Assistant',
     pick: 'Select a topic on the map first.',
-    on: 'Selected topic: {name}',
+    on: 'Focus: {name}',
     ideas: 'Brainstorm',
     expand: 'Expand branch',
     summarize: 'Summarize',
@@ -138,8 +145,13 @@ const STRINGS = {
     translateTr: 'Translate to Turkish',
     translateEn: 'Translate to English',
     fromNote: 'Branches from note',
+    nextSteps: 'Next steps',
+    nextStepsHint: 'Looks at the whole map, its tasks and dates, and suggests what is missing and what to do next.',
     ask: 'Ask',
-    askPlaceholder: 'Ask something about this branch… (e.g. "What\'s missing?")',
+    askPlaceholder: 'Ask about this map… (e.g. "What\'s the next step?")',
+    you: 'You',
+    newChat: 'New chat',
+    taskTag: 'task',
     thinking: '{who} is thinking…',
     cancel: 'Cancel',
     suggestions: '{n} suggestions',
@@ -282,6 +294,17 @@ export interface Assistant {
   preview(map: MindMap): { map: MindMap; ids: Set<string> } | null;
   accept(): void;
   applyAnswer(): void;
+  /** Questions and answers so far (kept while the map is open). */
+  chat: ChatTurn[];
+  clearChat(): void;
+}
+
+const CHAT_ACTIONS: AiAction[] = ['ask', 'nextSteps'];
+
+/** What a reply adds to the conversation, as text. */
+function replyText(reply: AiReply): string {
+  const topics = reply.additions.flatMap((a) => a.topics.map((t) => `- ${t.text}`));
+  return [reply.text ?? '', topics.join('\n')].filter(Boolean).join('\n');
 }
 
 /**
@@ -290,6 +313,9 @@ export interface Assistant {
  */
 export function useAssistant(getMap: () => MindMap, commit: (next: MindMap, select?: string | null) => void, toast: (msg: string) => void): Assistant {
   const [state, setState] = useState<AiState>({ status: 'idle' });
+  const [chat, setChat] = useState<ChatTurn[]>([]);
+  const chatRef = useRef(chat);
+  chatRef.current = chat;
   const job = useRef<string | null>(null);
   const runId = useRef(0);
 
@@ -299,12 +325,13 @@ export function useAssistant(getMap: () => MindMap, commit: (next: MindMap, sele
     if (!findTopic(map, topicId)) return;
     if (job.current) void cancelJob(job.current);
     const id = ++runId.current;
-    const { prompt, refs } = buildPrompt(map, topicId, action, { question, lang: prefs.lang });
+    const { prompt, refs } = buildPrompt(map, topicId, action, { question, lang: prefs.lang, history: chatRef.current, today: today() });
     setState({ status: 'running', action, topicId, provider, question });
     runPrompt(provider, prompt, (j) => (job.current = j))
       .then((raw) => {
         if (id !== runId.current) return;
         const reply = parseReply(raw, refs, topicId, action);
+        if (CHAT_ACTIONS.includes(action)) setChat((c) => [...c, { question: question ?? s(action), answer: replyText(reply) }]);
         setState({ status: 'done', action, topicId, reply, skip: new Set() });
       })
       .catch((e: unknown) => {
@@ -365,7 +392,9 @@ export function useAssistant(getMap: () => MindMap, commit: (next: MindMap, sele
   // Leaving the map stops a running job.
   useEffect(() => () => void (job.current && cancelJob(job.current)), []);
 
-  return { state, run, cancel, discard, toggle, preview, accept, applyAnswer };
+  const clearChat = useCallback(() => setChat([]), []);
+
+  return { state, run, cancel, discard, toggle, preview, accept, applyAnswer, chat, clearChat };
 }
 
 // ---------- side panel ----------
@@ -401,6 +430,7 @@ function Suggestions({ additions, map, skip, onToggle }: { additions: AiAddition
                 <input type="checkbox" checked={!skip.has(key)} onChange={() => onToggle(key)} />
                 <span>
                   {tp.text}
+                  {tp.task && <span className="ai-tag">{s('taskTag')}{tp.due ? ` · ${tp.due}` : ''}</span>}
                   <SuggestionTree topics={tp.children} />
                 </span>
               </label>
@@ -427,13 +457,21 @@ export function AssistantPanel({ map, topicId, assistant, onClose }: PanelProps)
   const topic = topicId ? findTopic(map, topicId) : undefined;
   const busy = state.status === 'running';
   const runOn = (a: AiAction, q?: string) => topic && assistant.run(a, topic.id, q);
+  const ask = () => {
+    if (!question.trim() || busy) return;
+    runOn('ask', question.trim());
+    setQuestion('');
+  };
+  // The newest answer shows below with its buttons, not in the history too.
+  const inChat = state.status === 'done' && (state.action === 'ask' || state.action === 'nextSteps');
+  const shownChat = inChat ? assistant.chat.slice(0, -1) : assistant.chat;
 
   let body: JSX.Element | null = null;
   if (state.status === 'running') {
     body = (
       <div className="ai-status" role="status">
         <span className="ai-spinner" aria-hidden="true" />
-        <span>{s('thinking', { who: providerName(state.provider) })}</span>
+        <span>{state.question ? <><strong>{s('you')}:</strong> {state.question}<br /></> : null}{s('thinking', { who: providerName(state.provider) })}</span>
         <button className="btn sm" onClick={assistant.cancel}>{s('cancel')}</button>
       </div>
     );
@@ -454,6 +492,7 @@ export function AssistantPanel({ map, topicId, assistant, onClose }: PanelProps)
     const textToTopic = state.action === 'rewrite' || state.action === 'translateTr' || state.action === 'translateEn';
     body = (
       <div className="ai-result">
+        {inChat && <p className="ai-q"><strong>{s('you')}:</strong> {assistant.chat[assistant.chat.length - 1]?.question}</p>}
         {reply.text && (
           <>
             <p className="ai-answer">{reply.text}</p>
@@ -501,6 +540,9 @@ export function AssistantPanel({ map, topicId, assistant, onClose }: PanelProps)
           ) : (
             <>
               <p className="muted small ai-on">{s('on', { name: topic.text.split('\n')[0] || '…' })}</p>
+              <button className="btn primary ai-next" disabled={busy} title={s('nextStepsHint')} onClick={() => runOn('nextSteps')}>
+                <I.TaskIcon size={16} /> {s('nextSteps')}
+              </button>
               <div className="ai-actions">
                 {PANEL_ACTIONS.map((a) => (
                   <button
@@ -514,13 +556,18 @@ export function AssistantPanel({ map, topicId, assistant, onClose }: PanelProps)
                   </button>
                 ))}
               </div>
-              <form
-                className="ai-ask"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  if (question.trim()) runOn('ask', question.trim());
-                }}
-              >
+              {shownChat.length > 0 && (
+                <div className="ai-chat">
+                  {shownChat.map((c, i) => (
+                    <div key={i} className="ai-turn">
+                      <p className="ai-q"><strong>{s('you')}:</strong> {c.question}</p>
+                      <p className="ai-answer">{c.answer}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {body}
+              <form className="ai-ask" onSubmit={(e) => (e.preventDefault(), ask())}>
                 <textarea
                   className="fld"
                   rows={3}
@@ -531,15 +578,20 @@ export function AssistantPanel({ map, topicId, assistant, onClose }: PanelProps)
                     e.stopPropagation();
                     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                       e.preventDefault();
-                      if (question.trim()) runOn('ask', question.trim());
+                      ask();
                     }
                   }}
                 />
-                <button className="btn sm" type="submit" disabled={busy || !question.trim()}>{s('ask')}</button>
+                <div className="row">
+                  {assistant.chat.length > 0 && (
+                    <button className="btn sm" type="button" disabled={busy} onClick={assistant.clearChat}>{s('newChat')}</button>
+                  )}
+                  <button className="btn sm primary" type="submit" disabled={busy || !question.trim()}>{s('ask')}</button>
+                </div>
               </form>
             </>
           )}
-          {body}
+          {!topic && body}
           <p className="muted small">{s('privacy')}</p>
         </>
       )}

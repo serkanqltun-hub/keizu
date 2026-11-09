@@ -1,13 +1,14 @@
-// AI assistant: the part that doesn't depend on who answers. It turns a
-// branch of the map into a prompt, reads the reply (a small JSON object) and
+// AI assistant: the part that doesn't depend on who answers. It turns the
+// map (with the selected branch as its focus) into a prompt, reads the reply (a small JSON object) and
 // applies accepted suggestions to the map. The desktop app sends the prompt to
 // an AI command-line tool the user has signed in to with their own
 // subscription (Claude Code, Gemini CLI); see src/ui/assistant.tsx.
 
 import { pasteTopics } from './bulk';
 import { createTopic, findParent, findTopic, updateTopic, type MindMap, type Topic } from './model';
+import { isDate, priorityOf } from './tasks';
 
-export type AiAction = 'ideas' | 'expand' | 'summarize' | 'rewrite' | 'translateTr' | 'translateEn' | 'fromNote' | 'ask';
+export type AiAction = 'ideas' | 'expand' | 'summarize' | 'rewrite' | 'translateTr' | 'translateEn' | 'fromNote' | 'nextSteps' | 'ask';
 
 /** Actions that add branches; the rest answer with text. */
 export const BRANCH_ACTIONS: AiAction[] = ['ideas', 'expand', 'fromNote'];
@@ -16,6 +17,10 @@ export const BRANCH_ACTIONS: AiAction[] = ['ideas', 'expand', 'fromNote'];
 export interface AiTopic {
   text: string;
   children: AiTopic[];
+  /** Suggested as a task (an open checkbox). */
+  task?: boolean;
+  /** Task due date, YYYY-MM-DD. */
+  due?: string;
 }
 
 /** Suggested topics to add under one existing topic. */
@@ -34,68 +39,131 @@ export interface AiReply {
 interface Context {
   outline: string;
   refs: Map<string, string>;
-  path: string[];
+  links: string[];
+  focusRef: string;
 }
 
-const MAX_CONTEXT = 6000;
+const MAX_CONTEXT = 16000;
 const MAX_TOPICS = 60;
 const MAX_TEXT = 240;
 const MAX_DEPTH = 4;
+const MAX_NOTE = 600;
 
 const oneLine = (s: string) => s.replace(/\s*\n\s*/g, ' ').trim();
 
-/** The branch of `topicId` as an indented list with refs ([t1], [t2]…). */
-function branchContext(map: MindMap, topicId: string): Context {
-  const refs = new Map<string, string>();
-  const lines: string[] = [];
-  let size = 0;
-  let n = 0;
-  const walk = (t: Topic, depth: number) => {
-    if (size > MAX_CONTEXT) return;
-    const ref = `t${++n}`;
-    refs.set(ref, t.id);
-    const line = `${'  '.repeat(depth)}- [${ref}] ${oneLine(t.text) || '(boş)'}`;
-    lines.push(line);
-    size += line.length;
-    if (t.note) {
-      const note = oneLine(t.note).slice(0, 400);
-      lines.push(`${'  '.repeat(depth)}  note: ${note}`);
-      size += note.length;
+/** "[ ] ", tags, due date, assignee, priority, inner map size: what a topic carries besides its text. */
+function topicMeta(t: Topic): { box: string; suffix: string } {
+  const box = t.task === 'done' ? '[x] ' : t.task === 'todo' ? '[ ] ' : '';
+  const parts: string[] = [];
+  for (const tag of t.tags ?? []) parts.push(`#${tag}`);
+  if (t.due) parts.push(`due ${t.due}`);
+  if (t.assignee) parts.push(`@${t.assignee}`);
+  const prio = priorityOf(t);
+  if (prio) parts.push(`priority ${prio}`);
+  if (t.innerSize) parts.push(`(has an inner map of ${t.innerSize} topics)`);
+  return { box, suffix: parts.length ? ` ${parts.join(' ')}` : '' };
+}
+
+/**
+ * The whole map as an indented list with refs ([t1], [t2]…), task state,
+ * tags and notes, the focus branch marked, plus relations and flow links.
+ * When the map is too big, branches outside the focus are cut short first.
+ */
+function mapContext(map: MindMap, focusId: string): Context {
+  const focusPath = new Set<string>([focusId]);
+  for (let p = findParent(map, focusId); p; p = findParent(map, p.id)) focusPath.add(p.id);
+  const render = (otherDepth: number, noteLen: number) => {
+    const refs = new Map<string, string>();
+    const byId = new Map<string, string>();
+    const lines: string[] = [];
+    let n = 0;
+    const ref = (id: string) => {
+      let r = byId.get(id);
+      if (!r) {
+        r = `t${++n}`;
+        byId.set(id, r);
+        refs.set(r, id);
+      }
+      return r;
+    };
+    const walk = (t: Topic, depth: number, inFocus: boolean) => {
+      const pad = '  '.repeat(depth);
+      const { box, suffix } = topicMeta(t);
+      const mark = t.id === focusId ? '   <-- FOCUS' : '';
+      lines.push(`${pad}- [${ref(t.id)}] ${box}${oneLine(t.text) || '(empty)'}${suffix}${mark}`);
+      if (t.note?.trim()) {
+        const note = oneLine(t.note);
+        lines.push(`${pad}  note: ${note.length > noteLen ? `${note.slice(0, noteLen)}…` : note}`);
+      }
+      for (const sm of t.summaries ?? []) lines.push(`${pad}  summary of some children: ${oneLine(sm.topic.text)}`);
+      const deeper = inFocus || focusPath.has(t.id) || depth < otherDepth;
+      if (!deeper && t.children.length) {
+        const count = (x: Topic): number => x.children.reduce((k, c) => k + 1 + count(c), 0);
+        lines.push(`${pad}  … (${count(t)} more topics not shown)`);
+        return;
+      }
+      for (const c of t.children) walk(c, depth + 1, inFocus || t.id === focusId || c.id === focusId);
+    };
+    map.roots.forEach((r, i) => {
+      if (i === 1) lines.push('Floating topics (not attached to the main topic):');
+      walk(r, i === 0 ? 0 : 1, r.id === focusId);
+    });
+    const links: string[] = [];
+    for (const r of map.relations) {
+      const a = byId.get(r.from), b = byId.get(r.to);
+      if (!a || !b) continue;
+      const label = r.label ? ` "${oneLine(r.label)}"` : '';
+      links.push(r.kind === 'flow' ? `- flow: [${a}] also leads to [${b}]${label}` : `- relation: [${a}] -> [${b}]${label}`);
     }
-    for (const c of t.children) walk(c, depth + 1);
+    return { outline: lines.join('\n'), refs, links, focusRef: byId.get(focusId) ?? 't1' };
   };
-  const topic = findTopic(map, topicId);
-  if (topic) walk(topic, 0);
-  if (size > MAX_CONTEXT) lines.push('  …');
-  const path: string[] = [];
-  for (let p = findParent(map, topicId); p; p = findParent(map, p.id)) path.unshift(oneLine(p.text));
-  return { outline: lines.join('\n'), refs, path };
+  let ctx = render(Infinity, MAX_NOTE);
+  for (const [depth, note] of [[3, 300], [2, 160], [1, 80]] as const) {
+    if (ctx.outline.length + ctx.links.join('\n').length <= MAX_CONTEXT) break;
+    ctx = render(depth, note);
+  }
+  if (ctx.outline.length > MAX_CONTEXT) ctx = { ...ctx, outline: `${ctx.outline.slice(0, MAX_CONTEXT)}\n…` };
+  return ctx;
 }
 
 const TASKS: Record<AiAction, string> = {
   ideas:
-    'Brainstorm 5 to 8 new, distinct sub-topics for [t1]. Do not repeat its existing children. Keep each topic short (a few words). Answer with {"add":[{"parent":"t1","topics":[{"text":"…","children":[]}]}]}.',
+    'Brainstorm 5 to 8 new, distinct sub-topics for the FOCUS topic [F]. Do not repeat its existing children or ideas found elsewhere in the map. Keep each topic short (a few words). Answer with {"add":[{"parent":"F","topics":[{"text":"…","children":[]}]}]}.',
   expand:
-    'Deepen this branch by one level: for each topic that has no children yet, suggest 2 to 4 short sub-topics. Answer with {"add":[{"parent":"<ref>","topics":[{"text":"…","children":[]}]}, …]} using the refs from the outline.',
+    'Deepen the FOCUS branch by one level: for each topic in it that has no children yet, suggest 2 to 4 short sub-topics. Answer with {"add":[{"parent":"<ref>","topics":[{"text":"…","children":[]}]}, …]} using the refs from the outline.',
   fromNote:
-    'Turn the note of [t1] (and any text in it) into a well-structured tree of short sub-topics for [t1], at most 3 levels deep. Answer with {"add":[{"parent":"t1","topics":[{"text":"…","children":[…]}]}]}.',
-  summarize: 'Summarize this branch in one short paragraph (2 to 4 sentences). Answer with {"text":"…"}.',
-  rewrite: 'Rewrite the text of [t1] to be clearer and shorter, keeping its meaning. Answer with {"text":"…"} holding only the new topic text.',
-  translateTr: 'Translate the text of [t1] into Turkish. Answer with {"text":"…"} holding only the translation.',
-  translateEn: 'Translate the text of [t1] into English. Answer with {"text":"…"} holding only the translation.',
-  ask: 'Answer the user\'s question below about this mind map branch. Answer with {"text":"…"}. If the answer is best given as new topics, also include "add" as described: {"text":"…","add":[{"parent":"<ref>","topics":[…]}]}.',
+    'Turn the note of the FOCUS topic [F] into a well-structured tree of short sub-topics for [F], at most 3 levels deep. Answer with {"add":[{"parent":"F","topics":[{"text":"…","children":[…]}]}]}.',
+  summarize: 'Summarize the FOCUS branch in one short paragraph (2 to 4 sentences). Answer with {"text":"…"}.',
+  rewrite: 'Rewrite the text of the FOCUS topic [F] to be clearer and shorter, keeping its meaning. Answer with {"text":"…"} holding only the new topic text.',
+  translateTr: 'Translate the text of the FOCUS topic [F] into Turkish. Answer with {"text":"…"} holding only the translation.',
+  translateEn: 'Translate the text of the FOCUS topic [F] into English. Answer with {"text":"…"} holding only the translation.',
+  nextSteps:
+    'Look at the whole map with the FOCUS branch [F] as the area of interest: open and done tasks, due dates, empty branches and gaps. In "text", say briefly where things stand, what is missing or blocked, and what the next steps are (a short paragraph plus up to 5 short lines starting with "- "). In "add", suggest 3 to 5 concrete next-step tasks, each under the topic it belongs to, with "task":true and, when a date makes sense, "due":"YYYY-MM-DD". Answer with {"text":"…","add":[{"parent":"<ref>","topics":[{"text":"…","task":true,"children":[]}]}]}.',
+  ask: 'Answer the user\'s question about this mind map. Use the whole map; the FOCUS branch is what the user has selected. Answer with {"text":"…"}. If the answer is best given as new topics, also include "add": {"text":"…","add":[{"parent":"<ref>","topics":[{"text":"…","children":[]}]}]}; mark a topic that is something to do with "task":true.',
 };
+
+/** One finished exchange of the panel's conversation. */
+export interface ChatTurn {
+  question: string;
+  answer: string;
+}
 
 export interface PromptOptions {
   /** The user's question (action "ask"). */
   question?: string;
   /** Language for answers: "auto" follows the map's own language. */
   lang?: 'auto' | 'tr' | 'en';
+  /** Earlier questions and answers, oldest first (actions "ask" and "nextSteps"). */
+  history?: ChatTurn[];
+  /** Today, YYYY-MM-DD (for due dates). */
+  today?: string;
 }
+
+const MAX_HISTORY = 6;
 
 /** The full prompt for an action on a topic, plus the refs used in it. */
 export function buildPrompt(map: MindMap, topicId: string, action: AiAction, opts: PromptOptions = {}): { prompt: string; refs: Map<string, string> } {
-  const ctx = branchContext(map, topicId);
+  const ctx = mapContext(map, topicId);
   const lang =
     action === 'translateTr' || action === 'translateEn'
       ? ''
@@ -104,15 +172,19 @@ export function buildPrompt(map: MindMap, topicId: string, action: AiAction, opt
         : opts.lang === 'en'
           ? 'Write all text in English.'
           : 'Write all text in the same language as the mind map.';
+  const chat = action === 'ask' || action === 'nextSteps' ? (opts.history ?? []).slice(-MAX_HISTORY) : [];
   const parts = [
     'You are the assistant inside Keizu, a mind mapping app. You only produce text; do not use tools, read files or run commands.',
     `Mind map: "${oneLine(map.title)}"`,
-    ctx.path.length ? `Path from the central topic to the branch: ${ctx.path.join(' > ')}` : '',
-    'Branch (each topic has a ref in brackets):',
+    opts.today ? `Today is ${opts.today}.` : '',
+    'The whole map (each topic has a ref in brackets; "[ ]" is an open task, "[x]" a done one):',
     ctx.outline,
+    ctx.links.length ? `Links between topics:\n${ctx.links.join('\n')}` : '',
+    `The FOCUS topic is [${ctx.focusRef}].`,
+    chat.length ? `Earlier in this conversation:\n${chat.map((c) => `User: ${oneLine(c.question)}\nAssistant: ${oneLine(c.answer).slice(0, 1500)}`).join('\n')}` : '',
     '',
-    `Task: ${TASKS[action]}`,
-    action === 'ask' && opts.question ? `User's question: ${oneLine(opts.question)}` : '',
+    `Task: ${TASKS[action].replace(/\[F\]/g, `[${ctx.focusRef}]`).replace(/"parent":"F"/g, `"parent":"${ctx.focusRef}"`)}`,
+    action === 'ask' && opts.question ? `User's question: ${opts.question.trim()}` : '',
     lang,
     'Reply with only one JSON object and nothing else: no explanation, no Markdown fences.',
   ];
@@ -142,8 +214,11 @@ function readTopics(v: unknown, depth: number, budget: { left: number }): AiTopi
     const text = oneLine(rawText).slice(0, MAX_TEXT);
     if (!text) continue;
     budget.left--;
-    const kids = item && typeof item === 'object' ? (item as { children?: unknown }).children : undefined;
-    out.push({ text, children: readTopics(kids, depth + 1, budget) });
+    const obj = item && typeof item === 'object' ? (item as { children?: unknown; task?: unknown; due?: unknown }) : undefined;
+    const topic: AiTopic = { text, children: readTopics(obj?.children, depth + 1, budget) };
+    if (obj?.task === true) topic.task = true;
+    if (topic.task && typeof obj?.due === 'string' && isDate(obj.due)) topic.due = obj.due;
+    out.push(topic);
   }
   return out;
 }
@@ -193,7 +268,12 @@ export function countSuggestions(additions: AiAddition[]): number {
 /** Key of a top-level suggestion: "<addition index>/<topic index>". */
 export const suggestionKey = (a: number, t: number) => `${a}/${t}`;
 
-const toTopic = (s: AiTopic): Topic => createTopic(s.text, s.children.map(toTopic));
+const toTopic = (s: AiTopic): Topic => {
+  const t = createTopic(s.text, s.children.map(toTopic));
+  if (s.task) t.task = 'todo';
+  if (s.due) t.due = s.due;
+  return t;
+};
 
 /**
  * Adds the suggestions to the map. `skip` holds keys of top-level suggestions

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { AiReplyError, applySuggestions, applyText, buildPrompt, countSuggestions, parseReply, suggestionKey } from './ai';
-import { createMap, createTopic, findTopic, type MindMap } from './model';
+import { addFlowLink, addRelation, createMap, createTopic, findTopic, updateTopic, type MindMap } from './model';
 
 function sample(): MindMap {
   const m = createMap('Oyun fikri');
@@ -12,30 +12,52 @@ function sample(): MindMap {
 }
 
 describe('buildPrompt', () => {
-  it('lists the branch with refs and the path above it', () => {
+  it('sends the whole map with refs and marks the focus', () => {
     const m = sample();
     const branch = m.roots[0].children[0];
     const { prompt, refs } = buildPrompt(m, branch.id, 'ideas');
-    expect(prompt).toContain('- [t1] Karakterler');
-    expect(prompt).toContain('  - [t2] Kahraman');
-    expect(prompt).toContain('central topic to the branch: Oyun fikri');
-    expect(refs.get('t1')).toBe(branch.id);
-    expect(refs.get('t3')).toBe(branch.children[1].id);
+    expect(prompt).toContain('- [t1] Oyun fikri');
+    expect(prompt).toContain('  - [t2] Karakterler   <-- FOCUS');
+    expect(prompt).toContain('    - [t3] Kahraman');
+    expect(prompt).toContain('  - [t5] Mekanikler');
+    expect(prompt).toContain('The FOCUS topic is [t2].');
+    expect(prompt).toContain('"parent":"t2"');
+    expect(refs.get('t2')).toBe(branch.id);
+    expect(refs.get('t4')).toBe(branch.children[1].id);
   });
 
-  it('includes notes, the question and the answer language', () => {
+  it('includes tasks, tags, notes, links, the date, the question and the language', () => {
+    let m = sample();
+    const [chars, mech] = m.roots[0].children;
+    m = updateTopic(m, chars.children[0].id, { task: 'done', tags: ['ana'], due: '2026-12-01', assignee: 'Ece' });
+    m = addRelation(m, chars.children[0].id, mech.id, 'kullanır').map;
+    m = addFlowLink(m, chars.children[1].id, mech.id).map;
+    const p = buildPrompt(m, mech.id, 'ask', { question: 'Sıradaki adım ne?', lang: 'tr', today: '2026-11-09' }).prompt;
+    expect(p).toContain('[x] Kahraman #ana due 2026-12-01 @Ece');
+    expect(p).toContain('note: Zıplama, tırmanma, yüzme');
+    expect(p).toContain('relation: [t3] -> [t5] "kullanır"');
+    expect(p).toContain('flow: [t4] also leads to [t5]');
+    expect(p).toContain('Today is 2026-11-09.');
+    expect(p).toContain('Sıradaki adım ne?');
+    expect(p).toContain('Turkish');
+  });
+
+  it('adds the earlier conversation to questions only', () => {
     const m = sample();
-    const mech = m.roots[0].children[1];
-    expect(buildPrompt(m, mech.id, 'fromNote').prompt).toContain('note: Zıplama, tırmanma, yüzme');
-    const ask = buildPrompt(m, mech.id, 'ask', { question: 'Ne eksik?', lang: 'tr' }).prompt;
-    expect(ask).toContain('Ne eksik?');
-    expect(ask).toContain('Turkish');
+    const history = [{ question: 'Ne eksik?', answer: 'Ses tasarımı eksik.' }];
+    expect(buildPrompt(m, m.roots[0].id, 'ask', { question: 'Peki onu aç', history }).prompt).toContain('User: Ne eksik?\nAssistant: Ses tasarımı eksik.');
+    expect(buildPrompt(m, m.roots[0].id, 'ideas', { history }).prompt).not.toContain('Ses tasarımı');
   });
 
-  it('cuts very large branches', () => {
-    const m = createMap('Büyük', 'Kök');
-    m.roots[0].children = Array.from({ length: 2000 }, (_, i) => createTopic(`Konu numarası ${i}`));
-    expect(buildPrompt(m, m.roots[0].id, 'summarize').prompt.length).toBeLessThan(9000);
+  it('cuts branches outside the focus first on very large maps', () => {
+    const m = createMap('Büyük');
+    const big = createTopic('Büyük dal', Array.from({ length: 300 }, (_, i) => createTopic(`Konu ${i}`, [createTopic(`Alt konu ${i} a`), createTopic(`Alt konu ${i} b`)])));
+    const focus = createTopic('Odak', [createTopic('Odak çocuğu', [createTopic('Derin')])]);
+    m.roots[0].children = [big, createTopic('Ara', [focus])];
+    const { prompt } = buildPrompt(m, focus.id, 'summarize');
+    expect(prompt.length).toBeLessThan(20000);
+    expect(prompt).toContain('Derin');
+    expect(prompt).toContain('more topics not shown');
   });
 });
 
@@ -45,13 +67,22 @@ describe('parseReply', () => {
   const { refs } = buildPrompt(m, branch.id, 'expand');
 
   it('reads additions with refs, fences and chatter around the JSON', () => {
-    const raw = 'Here you go:\n```json\n{"add":[{"parent":"t2","topics":[{"text":"Geçmişi","children":[{"text":"Köy"}]}]},{"parent":"[t3]","topics":["Motivasyon"]}]}\n```';
+    const raw = 'Here you go:\n```json\n{"add":[{"parent":"t3","topics":[{"text":"Geçmişi","children":[{"text":"Köy"}]}]},{"parent":"[t4]","topics":["Motivasyon"]}]}\n```';
     const r = parseReply(raw, refs, branch.id, 'expand');
     expect(r.additions).toHaveLength(2);
     expect(r.additions[0].parentId).toBe(branch.children[0].id);
     expect(r.additions[0].topics[0]).toEqual({ text: 'Geçmişi', children: [{ text: 'Köy', children: [] }] });
     expect(r.additions[1].parentId).toBe(branch.children[1].id);
     expect(countSuggestions(r.additions)).toBe(3);
+  });
+
+  it('reads suggested tasks with valid due dates', () => {
+    const r = parseReply('{"text":"Durum","add":[{"parent":"t2","topics":[{"text":"Test et","task":true,"due":"2026-11-20"},{"text":"Yaz","task":true,"due":"yarın"}]}]}', refs, branch.id, 'nextSteps');
+    expect(r.text).toBe('Durum');
+    expect(r.additions[0].topics[0]).toMatchObject({ task: true, due: '2026-11-20' });
+    expect(r.additions[0].topics[1].due).toBeUndefined();
+    const added = applySuggestions(m, r.additions);
+    expect(findTopic(added.map, added.ids[0])).toMatchObject({ task: 'todo', due: '2026-11-20' });
   });
 
   it('falls back to the action topic for unknown refs and bare topic lists', () => {
