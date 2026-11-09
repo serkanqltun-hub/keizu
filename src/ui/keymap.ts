@@ -67,7 +67,11 @@ export type CommandId =
   | 'task'
   | 'tag'
   | 'filter'
-  | 'tasks';
+  | 'tasks'
+  | 'assistant'
+  | 'aiIdeas'
+  | 'aiExpand'
+  | 'aiSummarize';
 
 
 export interface CommandDef {
@@ -123,6 +127,10 @@ export const COMMANDS: CommandDef[] = [
   { id: 'notebook', keys: ['Mod+Alt+N'], group: 'view' },
   { id: 'filter', keys: ['Mod+Shift+F'], group: 'view' },
   { id: 'tasks', keys: [], group: 'view' },
+  { id: 'assistant', keys: ['Mod+J'], group: 'view' },
+  { id: 'aiIdeas', keys: [], group: 'edit' },
+  { id: 'aiExpand', keys: [], group: 'edit' },
+  { id: 'aiSummarize', keys: [], group: 'edit' },
   { id: 'zoomIn', keys: ['Mod+=', 'Mod++'], group: 'view' },
   { id: 'zoomOut', keys: ['Mod+-'], group: 'view' },
   { id: 'fit', keys: ['Mod+0'], group: 'view' },

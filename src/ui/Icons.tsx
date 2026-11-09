@@ -153,6 +153,14 @@ export const FocusIcon = (p: P) => (
   </Svg>
 );
 
+/** AI assistant: a four-point spark with a small one beside it. */
+export const Sparkle = (p: P) => (
+  <Svg {...p}>
+    <path d="M10 3.5l1.6 4.9 4.9 1.6-4.9 1.6L10 16.5l-1.6-4.9L3.5 10l4.9-1.6z" />
+    <path d="M18 14.5l.8 2.2 2.2.8-2.2.8L18 20.5l-.8-2.2-2.2-.8 2.2-.8z" />
+  </Svg>
+);
+
 /** Task mode: a checked box. */
 export const TaskIcon = (p: P) => <Svg {...p}><rect x="4" y="4" width="16" height="16" rx="4" /><path d="M8 12.5l3 3 5-6" /></Svg>;
 /** Filter: a funnel. */
