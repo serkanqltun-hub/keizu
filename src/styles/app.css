@@ -610,3 +610,31 @@ button.tag-chip { cursor: pointer; }
 .sb-tasks { padding: 2px 6px; border: 0; border-radius: 4px; background: transparent; font: inherit; color: inherit; cursor: pointer; }
 .sb-tasks:hover { background: var(--soft); color: var(--ink); }
 .outline-panel .o-tag { display: none; }
+
+/* AI assistant */
+.ai-panel { gap: 14px; }
+.ai-panel .sc-head strong { display: inline-flex; align-items: center; gap: 6px; }
+.ai-on { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-ask { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; }
+.ai-ask textarea.fld { height: auto; padding: 8px 10px; font-size: 13px; line-height: 1.45; resize: vertical; }
+.ai-status { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.ai-status .btn { margin-left: auto; }
+.ai-spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--line); border-top-color: var(--accent); animation: kz-spin 0.8s linear infinite; flex: none; }
+@keyframes kz-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ai-spinner { animation-duration: 2.4s; } }
+.ai-result { display: flex; flex-direction: column; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--soft); }
+.ai-result .row { flex-wrap: wrap; }
+.ai-answer { margin: 0; font-size: 13px; line-height: 1.5; white-space: pre-wrap; }
+.ai-list { display: flex; flex-direction: column; gap: 10px; max-height: 340px; overflow-y: auto; }
+.ai-group { display: flex; flex-direction: column; gap: 4px; }
+.ai-item { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 1.4; cursor: pointer; }
+.ai-item input { margin-top: 2px; accent-color: var(--accent); flex: none; }
+.ai-sub { margin: 2px 0 0; padding-left: 14px; color: var(--muted); font-size: 12px; }
+.ai-card.on { border-color: var(--accent); }
+.ai-state { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.ai-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.ai-dot.ok { background: var(--ok); }
+.ai-dot.warn { background: #e8a33d; }
+.ai-dot.bad { background: #c92a2a; }
+.ai-cmd { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; background: var(--soft); font-family: 'JetBrains Mono', monospace; font-size: 12px; overflow-x: auto; white-space: nowrap; }

@@ -9,6 +9,7 @@ import { discover, login, pair, KeizuServerAdapter, type ServerInfo } from '../s
 import * as I from './Icons';
 import { isDesktop } from './platform';
 import { UpdateSettings, updatesTitle } from './updates';
+import { AssistantSettings, assistantTitle } from './assistant';
 import { setMotionPrefs, useMotionPrefs, type MotionMode, type WheelMode } from './motion';
 
 export const GUIDE_URL = 'https://github.com/serkanqltun-hub/keizu/blob/main/docs/server/hetzner.md';
@@ -370,7 +371,7 @@ function Activity({ items }: { items: SyncEvent[] }) {
 
 export function SyncSettings({ onBack, link }: Props) {
   const { config, prefs, activity } = useSync();
-  const [page, setPage] = useState<'sync' | 'motion' | 'updates'>('sync');
+  const [page, setPage] = useState<'sync' | 'motion' | 'updates' | 'ai'>('sync');
   return (
     <div className="settings">
       <aside className="settings-side">
@@ -390,9 +391,16 @@ export function SyncSettings({ onBack, link }: Props) {
               <I.Import size={16} /> {updatesTitle()}
             </button>
           )}
+          <button className={`nav-item ${page === 'ai' ? 'on' : ''}`} aria-current={page === 'ai' ? 'page' : undefined} onClick={() => setPage('ai')}>
+            <I.Sparkle size={16} /> {assistantTitle()}
+          </button>
         </nav>
       </aside>
-      {page === 'updates' ? (
+      {page === 'ai' ? (
+        <main className="settings-main">
+          <AssistantSettings />
+        </main>
+      ) : page === 'updates' ? (
         <main className="settings-main">
           <UpdateSettings />
         </main>

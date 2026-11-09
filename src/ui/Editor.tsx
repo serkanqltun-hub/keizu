@@ -94,6 +94,8 @@ import { openExternal } from './platform';
 import { ShareDialog } from './ShareDialog';
 import { useLive, type SharedRef } from './useLive';
 import { sync } from '../sync/controller';
+import { AssistantPanel, actionLabel, useAiAvailable, useAiPrefs, useAssistant } from './assistant';
+import type { AiAction } from '../core/ai';
 
 type Dir = 'left' | 'right' | 'up' | 'down';
 
@@ -179,6 +181,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const pathRef = useRef(path);
   pathRef.current = path;
   const map = useMemo(() => viewOf(doc, path), [doc, path]);
+  const mapRef = useRef(map);
+  mapRef.current = map;
   const startId = focusId && findTopic(initial, focusId) ? focusId : initial.roots[0].id;
   // The selected topic (the one the keyboard and the panel act on) and, with
   // multi-select, the other selected topics. Selecting one topic clears the rest.
@@ -259,8 +263,20 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const theme = getTheme(map.theme);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const filtering = filterActive(filter);
+  // AI assistant: its suggestions show faded on the map until added or discarded.
+  const [aiOpen, setAiOpen] = useState(false);
+  const aiPrefs = useAiPrefs();
+  const aiAvailable = useAiAvailable();
+  const commitRef = useRef<(next: MindMap, select?: string | null) => void>(() => {});
+  const assistant = useAssistant(
+    useCallback(() => mapRef.current, []),
+    useCallback((next: MindMap, select?: string | null) => commitRef.current(next, select), []),
+    useCallback((msg: string) => setToast(msg), []),
+  );
   // "Hide" filtering lays out only matching topics (and the way to them).
-  const shownMap = useMemo(() => (filtering && filter.mode === 'hide' ? filterMap(map, filter) : map), [map, filter, filtering]);
+  const filteredMap = useMemo(() => (filtering && filter.mode === 'hide' ? filterMap(map, filter) : map), [map, filter, filtering]);
+  const ghost = useMemo(() => (view === 'map' ? assistant.preview(filteredMap) : null), [assistant.preview, filteredMap, view]);
+  const shownMap = ghost?.map ?? filteredMap;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const layout = useMemo(() => layoutMap(shownMap, canvasMeasure, focus ?? undefined), [shownMap, fontsReady, focus]);
   // The whole map's layout: the same one outside focus mode.
@@ -274,6 +290,8 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     for (const b of layout.nodes) if (!matched.has(b.id)) out.add(b.id);
     return out;
   }, [matched, filter, layout]);
+  /** Faded topics: filtered out ("dim") or suggested by the assistant. */
+  const dimIds = useMemo(() => (ghost ? new Set([...(filterDim ?? []), ...ghost.ids]) : filterDim), [ghost, filterDim]);
   const mapTags = useMemo(() => allTags(map), [map]);
   const taskCount = useMemo(() => {
     let all = 0, done = 0;
@@ -415,6 +433,23 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     setHist((h) => push(h, writeBack(h.present, pathRef.current, next)));
     if (select !== undefined) setSelectedId(select);
   }, []);
+  commitRef.current = commit;
+  /** Runs an assistant action on a topic and shows the panel for its answer. */
+  const aiRun = (action: AiAction, id: string) => {
+    setAiOpen(true);
+    setHistoryOpen(false);
+    assistant.run(action, id);
+  };
+  // Suggestions arrived: bring the branch into view so they can be seen.
+  const aiState = assistant.state;
+  useEffect(() => {
+    if (aiState.status === 'done' && aiState.reply.additions.length) canvas.current?.centerOn(aiState.topicId);
+  }, [aiState]);
+  const closeAssistant = () => {
+    setAiOpen(false);
+    if (assistant.state.status === 'running') assistant.cancel();
+    else if (assistant.state.status === 'done') assistant.discard();
+  };
   /**
    * Edits the view at `at` as it is now. The drawing canvas saves after a
    * pause, possibly after you have left that view, so it can't use `map`.
@@ -1199,6 +1234,20 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
       view === 'map' && commands.focus.enabled !== false && { type: 'item', id: 'focusMode', label: focused?.id === id ? t('focus.exit') : cmdLabel('focus'), keys: keyOf('focus'), icon: <I.FocusIcon size={16} />, run: actions.focus },
       view === 'map' && { type: 'item', id: 'focus', label: t('ctx.focus'), keys: keyOf('centerSelected'), icon: <I.Target size={16} />, run: () => canvas.current?.centerOn(id) },
       sep,
+      aiAvailable && !multi && {
+        type: 'sub',
+        id: 'assistant',
+        label: t('ctx.assistant'),
+        icon: <I.Sparkle size={16} />,
+        items: [
+          ...(['ideas', 'expand', 'summarize', 'rewrite', 'fromNote', 'translateTr', 'translateEn'] as AiAction[])
+            .filter((a) => a !== 'fromNote' || !!tp.note?.trim())
+            .map((a): CtxItem => ({ type: 'item', id: `ai-${a}`, label: actionLabel(a), run: () => aiRun(a, id) })),
+          { type: 'sep' },
+          { type: 'item', id: 'ai-open', label: cmdLabel('assistant'), keys: keyOf('assistant'), run: () => setAiOpen(true) },
+        ],
+      },
+      sep,
       (!isMain || multi) && item('cut', () => actions.copy(true), { icon: <I.Cut size={16} /> }),
       item('copy', () => actions.copy(), { icon: <I.Copy size={16} /> }),
       item('paste', () => void actions.paste(), { icon: <I.Paste size={16} /> }),
@@ -1366,6 +1415,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     tag: { run: openTagInput, enabled: !!selectedId && !readOnly },
     filter: { run: toggleFilter },
     tasks: { run: openTasks },
+    assistant: { run: () => (aiOpen ? closeAssistant() : (setAiOpen(true), setHistoryOpen(false))), enabled: aiPrefs.enabled },
+    aiIdeas: { run: () => selectedId && aiRun('ideas', selectedId), enabled: aiAvailable && !!selectedId && !readOnly },
+    aiExpand: { run: () => selectedId && aiRun('expand', selectedId), enabled: aiAvailable && !!selectedId && !readOnly },
+    aiSummarize: { run: () => selectedId && aiRun('summarize', selectedId), enabled: aiAvailable && !!selectedId && !readOnly },
     viewCanvas: { run: () => setKind(kind === 'map' ? 'canvas' : 'map'), enabled: !readOnly },
     viewBoth: { run: () => setKind(kind === 'both' ? 'map' : 'both'), enabled: !readOnly },
     addCanvas: {
@@ -1715,6 +1768,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
             <I.NotebookIcon />{t('tb.notebook')}
           </button>
           <button className={`tb ${filter ? 'on' : ''}`} aria-pressed={!!filter} title={tip('filter', t('tb.filterTip'))} onClick={toggleFilter}><I.FilterIcon />{t('tb.filter')}</button>
+          {aiAvailable && (
+            <button className={`tb ${aiOpen ? 'on' : ''}`} aria-pressed={aiOpen} title={tip('assistant')} onClick={commands.assistant.run}>
+              <I.Sparkle />{t('tb.assistant')}
+            </button>
+          )}
           </>}
         </nav>
         )}
@@ -1813,7 +1871,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               editingId={editingId}
               editSeed={editSeed}
               focusId={startId}
-              onSelect={selectTopic}
+              onSelect={(id) => !(id && ghost?.ids.has(id)) && selectTopic(id)}
               selectedIds={selectedSet}
               onSelectExtend={extendSelection}
               onSelectBox={(ids, additive) => selectMany(ids, additive)}
@@ -1858,7 +1916,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               }}
               onFloat={(id, pos) => !focused && commit(floatTopic(map, id, pos), id)}
               onCreateFloating={(pos) => !focused && actions.floating(pos)}
-              onStartEdit={(id) => startEdit(id)}
+              onStartEdit={(id) => !ghost?.ids.has(id) && startEdit(id)}
               onCommitEdit={commitEdit}
               onCancelEdit={cancelEdit}
               onMove={(id, parent, merge) => (merge ? actions.link(id, parent) : commit(moveTopic(map, id, parent)))}
@@ -1870,7 +1928,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
               onContextMenu={openMenu}
               onCheckTask={(id) => commit(checkTask(map, id))}
               onTagClick={filterByTag}
-              filterDim={filterDim}
+              filterDim={dimIds}
               noteId={noteId}
               noteEdit={noteEdit}
               onOpenNote={(id) => setNoteId(id)}
@@ -2009,7 +2067,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           />
         )}
 
-        {panelOpen && !historyOpen && !readOnly && !drawing && (
+        {aiOpen && !historyOpen && !readOnly && (
+          <AssistantPanel map={map} topicId={selectedId} assistant={assistant} onClose={closeAssistant} />
+        )}
+
+        {panelOpen && !historyOpen && !aiOpen && !readOnly && !drawing && (
           <FormatPanel
             map={map}
             topic={selected}

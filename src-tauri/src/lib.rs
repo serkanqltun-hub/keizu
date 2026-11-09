@@ -3,6 +3,8 @@
 // a file the user double-clicked (passed on the command line, or by the
 // "open document" event on macOS).
 
+mod ai;
+
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -110,7 +112,16 @@ pub fn run() {
             Ok(())
         })
         .manage(PendingFiles(Mutex::new(from_args)))
-        .invoke_handler(tauri::generate_handler![read_file, write_file, take_opened_files])
+        .manage(ai::AiJobs::default())
+        .invoke_handler(tauri::generate_handler![
+            read_file,
+            write_file,
+            take_opened_files,
+            ai::ai_detect,
+            ai::ai_run,
+            ai::ai_cancel,
+            ai::ai_login
+        ])
         .build(tauri::generate_context!())
         .expect("error while building Keizu")
         .run(|_app, _event| {
