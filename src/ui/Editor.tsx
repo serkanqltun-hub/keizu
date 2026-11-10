@@ -38,6 +38,7 @@ import {
   removeTopicImage,
   setMapProps,
   setTopicImage,
+  setTopicWidth,
   toggleCollapse,
   toggleMarker,
   updateStyle,
@@ -274,7 +275,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     useCallback((msg: string) => setToast(msg), []),
   );
   // "Hide" filtering lays out only matching topics (and the way to them).
-  const filteredMap = useMemo(() => (filtering && filter.mode === 'hide' ? filterMap(map, filter) : map), [map, filter, filtering]);
+  // A topic's width while its side grip is being dragged (not saved until released).
+  const [sizing, setSizing] = useState<{ id: string; w: number } | null>(null);
+  const sizedMap = useMemo(() => (sizing ? setTopicWidth(map, sizing.id, sizing.w) : map), [map, sizing]);
+  const filteredMap = useMemo(() => (filtering && filter.mode === 'hide' ? filterMap(sizedMap, filter) : sizedMap), [sizedMap, filter, filtering]);
   const ghost = useMemo(() => (view === 'map' ? assistant.preview(filteredMap) : null), [assistant.preview, filteredMap, view]);
   const shownMap = ghost?.map ?? filteredMap;
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1188,6 +1192,13 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
           })),
         ],
       },
+      targets.some((x) => findTopic(map, x)?.width) && {
+        type: 'item',
+        id: 'autoWidth',
+        label: t('ctx.autoWidth'),
+        icon: <I.ShapeIcon size={16} />,
+        run: () => commit(targets.reduce((m, x) => setTopicWidth(m, x, undefined), map)),
+      },
       {
         type: 'sub',
         id: 'layout',
@@ -1943,6 +1954,11 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
                 if (tp?.note) commit(updateTopic(map, id, { note: toggleNoteLine(tp.note, line) }));
               }}
               onOpenNoteLink={(href) => void actions.openHref(href)}
+              onResizePreview={(id, w) => setSizing(w === null ? null : { id, w })}
+              onResize={(id, w) => {
+                const next = setTopicWidth(map, id, w);
+                if (next !== map) commit(next, id);
+              }}
               readOnly={readOnly}
               peers={live.peers.map((p) => ({ id: p.id, name: p.name, color: p.color, selectedId: p.sel }))}
             />

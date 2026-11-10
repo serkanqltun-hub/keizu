@@ -127,6 +127,7 @@ export const en: Record<MessageKey, string> = {
   'ctx.addImage': 'Add image…',
   'ctx.color': 'Color',
   'ctx.autoColor': 'Automatic color',
+  'ctx.autoWidth': 'Automatic width',
   'ctx.shape': 'Shape',
   'ctx.branchLayout': 'Branch layout',
   'ctx.markers': 'Add marker…',

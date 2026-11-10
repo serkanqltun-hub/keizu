@@ -67,6 +67,11 @@ export interface Topic {
   collapsed?: boolean;
   style?: TopicStyle;
   /**
+   * Box width set by hand (drag a selected topic's side). Text and a shown
+   * note wrap to fit it. Unset: the box fits its text.
+   */
+  width?: number;
+  /**
    * This topic belongs to its parent's inner map: it is drawn only when you
    * enter the parent, not on the canvas around it.
    */
@@ -351,6 +356,24 @@ function touch(map: MindMap): MindMap {
 
 export function updateTopic(map: MindMap, id: string, patch: Partial<Omit<Topic, 'id' | 'children'>>): MindMap {
   return mapTopic(map, id, (t) => ({ ...t, ...patch }));
+}
+
+/** Narrowest and widest a topic can be made by hand. */
+export const TOPIC_MIN_W = 80;
+export const TOPIC_MAX_W = 1200;
+
+export const clampTopicWidth = (w: number) => Math.round(Math.min(TOPIC_MAX_W, Math.max(TOPIC_MIN_W, w)));
+
+/** Sets a topic's width by hand, or (undefined) lets it fit its text again. */
+export function setTopicWidth(map: MindMap, id: string, width: number | undefined): MindMap {
+  const t = findTopic(map, id);
+  if (!t) return map;
+  const w = width === undefined || !Number.isFinite(width) ? undefined : clampTopicWidth(width);
+  if (w === t.width) return map;
+  return mapTopic(map, id, (tp) => {
+    const { width: _old, ...rest } = tp;
+    return w === undefined ? (rest as Topic) : { ...rest, width: w };
+  });
 }
 
 export function updateStyle(map: MindMap, id: string, patch: TopicStyle): MindMap {

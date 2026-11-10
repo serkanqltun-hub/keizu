@@ -258,7 +258,34 @@ function RichNoteSvg({ nb, x, y, w, color, bg }: { nb: NoteBlock; x: number; y: 
   );
 }
 
-export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: NodeBox; theme: Theme; selected?: boolean; dimmed?: boolean; opacity?: number }) {
+/**
+ * Grips on both sides of a selected topic: drag one to set the topic's width
+ * by hand, double-click it to let the topic fit its text again.
+ */
+function ResizeHandles({ b, sig, color, canvas }: { b: NodeBox; sig: boolean; color: string; canvas: string }) {
+  const fixed = !!b.topic.width;
+  const gripH = Math.min(18, Math.max(8, b.h - 8));
+  return (
+    <g data-resize-handles="">
+      {([-1, 1] as const).map((side) => {
+        const cx = side < 0 ? -4 : b.w + 4;
+        return (
+          <g key={side} data-resize={side} style={{ cursor: 'ew-resize' }}>
+            {/* A wider, invisible strip makes the grip easy to catch. */}
+            <rect x={cx - 7} y={-4} width={14} height={b.h + 8} fill="transparent" />
+            {sig ? (
+              <circle cx={cx} cy={b.h / 2} r={4} fill={fixed ? color : canvas} stroke={color} strokeWidth={1.5} />
+            ) : (
+              <rect x={cx - 3} y={b.h / 2 - gripH / 2} width={6} height={gripH} rx={3} fill={fixed ? color : canvas} stroke={color} strokeWidth={1.5} />
+            )}
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+export function TopicView({ b, theme, selected, dimmed, opacity = 1, resizable }: { b: NodeBox; theme: Theme; selected?: boolean; dimmed?: boolean; opacity?: number; resizable?: boolean }) {
   const { fill, text } = nodeColors(b, theme);
   const s = b.topic.style ?? {};
   const markers = b.topic.markers ?? [];
@@ -287,7 +314,7 @@ export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: Node
       {selected && (
         <rect x={-4} y={-4} width={b.w + 8} height={b.h + 8} rx={rx + 3} fill="none" stroke={selColor} strokeWidth={sig ? 1.5 : 2} data-selection="" />
       )}
-      {selected && sig && (
+      {selected && sig && !resizable && (
         <g fill={theme.canvas} stroke={selColor} strokeWidth={1.5}>
           <circle cx={-4} cy={b.h / 2} r={4} />
           <circle cx={b.w + 4} cy={b.h / 2} r={4} />
@@ -344,6 +371,7 @@ export function TopicView({ b, theme, selected, dimmed, opacity = 1 }: { b: Node
         />
       )}
       {!!b.topic.innerSize && <InnerBadge b={b} theme={theme} />}
+      {selected && resizable && <ResizeHandles b={b} sig={sig} color={selColor} canvas={theme.canvas} />}
     </g>
   );
 }
@@ -620,9 +648,11 @@ interface MapSvgProps {
   simple?: boolean;
   /** Topics fading in or out during a layout change, by id. */
   fade?: Map<string, number>;
+  /** The selected topic shows grips to change its width. */
+  resizable?: boolean;
 }
 
-export function MapSvg({ map, layout, theme, selectedId, selectedIds, selectedRelId, selectedBoundaryId, dimIds, viewport, simple, fade }: MapSvgProps) {
+export function MapSvg({ map, layout, theme, selectedId, selectedIds, selectedRelId, selectedBoundaryId, dimIds, viewport, simple, fade, resizable }: MapSvgProps) {
   const vis = visibleIn(layout, viewport);
   const isSel = (id: string) => id === selectedId || !!selectedIds?.has(id);
   if (simple) return <SimpleMap map={map} layout={layout} theme={theme} nodes={vis.nodes} edges={vis.edges} isSel={isSel} />;
@@ -643,7 +673,7 @@ export function MapSvg({ map, layout, theme, selectedId, selectedIds, selectedRe
       <FlowArrows map={map} layout={layout} theme={theme} selectedRelId={selectedRelId} dimIds={dimIds} fade={fade} />
       <LinkLabels map={map} layout={layout} edges={vis.edges} theme={theme} />
       {vis.nodes.map((b) => (
-        <TopicView key={b.id} b={b} theme={theme} selected={isSel(b.id)} dimmed={dimIds?.has(b.id)} opacity={fade?.get(b.id) ?? 1} />
+        <TopicView key={b.id} b={b} theme={theme} selected={isSel(b.id)} dimmed={dimIds?.has(b.id)} opacity={fade?.get(b.id) ?? 1} resizable={resizable && b.id === selectedId} />
       ))}
       {vis.nodes.map((b) => (
         <CollapseBadge key={`c-${b.id}`} b={b} theme={theme} />
