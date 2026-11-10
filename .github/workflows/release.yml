@@ -37,12 +37,24 @@ jobs:
           result-encoding: string
           script: |
             const tag = context.ref.replace('refs/tags/', '');
+            const { owner, repo } = context.repo;
+            // Release notes come from the annotated tag's message
+            // (git tag -a v0.2.1 -F notes.txt). They also go into latest.json,
+            // so the app's update card shows them under "Neler yeni".
+            let notes = '';
+            const { data: ref } = await github.rest.git.getRef({ owner, repo, ref: `tags/${tag}` });
+            if (ref.object.type === 'tag') {
+              const { data: t } = await github.rest.git.getTag({ owner, repo, tag_sha: ref.object.sha });
+              notes = t.message.replace(/-----BEGIN [A-Z ]*SIGNATURE-----[\s\S]*$/, '').trim();
+            }
+            const install = 'İlk kurulum için aşağıdan işletim sistemine uygun dosyayı indir. / For a first install, download the file for your system below.';
+            const fallback = 'Keizu açık olduğunda bu sürümü kendisi bulur ve kurmayı önerir.\n\nKeizu finds this version by itself and offers to install it.';
             const { data } = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner,
+              repo,
               tag_name: tag,
               name: `Keizu ${tag}`,
-              body: 'Keizu açık olduğunda bu sürümü kendisi bulur ve kurmayı önerir. İlk kurulum için aşağıdan işletim sistemine uygun dosyayı indir.\n\nKeizu finds this version by itself and offers to install it. For a first install, download the file for your system below.',
+              body: `${notes || fallback}\n\n${install}`,
               draft: true,
             });
             return String(data.id);

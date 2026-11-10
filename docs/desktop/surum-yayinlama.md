@@ -25,10 +25,19 @@ alanına yaz.
 
 ## Her sürümde
 
+Sürüm notlarını bir metin dosyasına yaz (ör. `notlar.txt`), sonra açıklamalı
+etiket oluştur:
+
 ```sh
-git tag v0.2.0
-git push origin v0.2.0
+git tag -a v0.2.1 -F notlar.txt
+git push origin v0.2.1
 ```
+
+Etiketin mesajı sürüm sayfasına ve `latest.json` dosyasına girer; uygulamanın
+güncelleme kartında "Neler yeni" altında görünür. Düz metin yaz (Markdown
+işlenmez). Mesajsız etiket (`git tag v0.2.1`) de çalışır, o zaman genel bir
+açıklama kullanılır. `package.json` / `tauri.conf.json` / `Cargo.toml` içindeki
+sürümü de aynı numaraya çekmek iyi olur, ama derlenen sürüm etiketten gelir.
 
 "Release" iş akışı sürüm numarasını etiketten alır (v0.2.0 → 0.2.0), Windows
 (NSIS), macOS ve Linux paketlerini derler, imzalar, `latest.json` dosyasını
