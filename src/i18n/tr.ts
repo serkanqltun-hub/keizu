@@ -126,6 +126,7 @@ export const tr = {
   'ctx.addImage': 'Görsel ekle…',
   'ctx.color': 'Renk',
   'ctx.autoColor': 'Otomatik renk',
+  'ctx.autoWidth': 'Otomatik genişlik',
   'ctx.shape': 'Şekil',
   'ctx.branchLayout': 'Dal yerleşimi',
   'ctx.markers': 'İşaret ekle…',

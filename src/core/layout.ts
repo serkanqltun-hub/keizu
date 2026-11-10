@@ -6,7 +6,7 @@ import { layeredLayout, roundedPath, routePoints, type FlowEdgeIn, type FlowRout
 import { MARKER_GAP, MARKER_SIZE } from './markers';
 import type { LayoutKind, MindMap, Point, Relation, Summary, Topic, TopicShape } from './model';
 export type { Point };
-import { countTopics, findTopic, rangeIndices } from './model';
+import { clampTopicWidth, countTopics, findTopic, rangeIndices } from './model';
 import { layoutNote, type RichLine } from './richText';
 import { getTheme } from './themes';
 import { branchProgress, dueLabel } from './tasks';
@@ -286,12 +286,15 @@ export function wrapText(text: string, font: string, maxW: number, measure: Meas
   return out;
 }
 
-function noteBlockFor(t: Topic, fontSize: number, padY: number, contentW: number, measure: Measure, notebook = false): NoteBlock | undefined {
+/** `fixedW`: the topic has a width set by hand; the note fills it exactly. */
+function noteBlockFor(t: Topic, fontSize: number, padY: number, contentW: number, measure: Measure, notebook = false, fixedW?: number): NoteBlock | undefined {
   const note = notebook || t.style?.showNote ? t.note?.trim() : undefined;
   if (!note) return;
   const size = Math.max(notebook ? 12 : 11, Math.round(fontSize * (notebook ? 0.86 : 0.8)));
   const font = `400 ${size}px ${FONT_FAMILY}`;
-  const maxW = notebook
+  const maxW = fixedW !== undefined
+    ? fixedW
+    : notebook
     ? Math.min(NOTEBOOK_MAX_W, Math.max(NOTEBOOK_MIN_W, contentW))
     : Math.min(NOTE_MAX_W, Math.max(NOTE_MIN_W, contentW));
   const rich = layoutNote(note, size, maxW, measure, notebook ? Infinity : NOTE_MAX_LINES);
@@ -314,22 +317,28 @@ function sizeNode(t: Topic, depth: number, boxed: boolean, measure: Measure, res
   // Signature themes put a small dot before the text of boxed, non-central topics.
   const lead = signature && depth > 0 && (m.shape === 'rounded' || m.shape === 'pill' || m.shape === 'rect') ? LEAD_DOT : 0;
   const font = `${t.style?.italic ? 'italic ' : ''}${m.weight} ${m.fontSize}px ${FONT_FAMILY}`;
-  const lines = (t.text || ' ').split('\n');
-  const textW = Math.max(...lines.map((l) => measure(l || ' ', font)));
-  const lineHeight = Math.round(m.fontSize * 1.35);
   const icons = (t.markers?.length ?? 0) + (t.note ? 1 : 0) + (t.href ? 1 : 0) + (t.task ? 1 : 0);
   const iconW = icons * (MARKER_SIZE + MARKER_GAP);
+  // A width set by hand: never narrower than the icons need, and the text wraps inside it.
+  const fixed = t.width ? Math.max(clampTopicWidth(t.width), Math.ceil(iconW + lead + m.padX * 2 + 24)) : undefined;
+  const inner = fixed !== undefined ? fixed - m.padX * 2 : 0;
+  const lines = fixed !== undefined ? wrapText(t.text || ' ', font, inner - iconW - lead, measure) : (t.text || ' ').split('\n');
+  const textW = Math.max(...lines.map((l) => measure(l || ' ', font)));
+  const lineHeight = Math.round(m.fontSize * 1.35);
   const href = t.image && resources?.[t.image.res];
   let image: NodeBox['image'];
   if (href && t.image) {
-    const k = Math.min(1, IMAGE_MAX_W / t.image.width, IMAGE_MAX_H / t.image.height);
+    const k = Math.min(1, IMAGE_MAX_W / t.image.width, IMAGE_MAX_H / t.image.height, fixed !== undefined ? inner / t.image.width : 1);
     image = { href, w: Math.round(t.image.width * k), h: Math.round(t.image.height * k) };
   }
   const imageH = image ? image.h + IMAGE_GAP : 0;
-  const noteBlock = noteBlockFor(t, m.fontSize, m.padY, textW + iconW, measure, notebook);
+  const noteBlock = noteBlockFor(t, m.fontSize, m.padY, textW + iconW, measure, notebook, fixed !== undefined ? inner : undefined);
   const noteW = noteBlock?.w ?? 0;
   const meta = metaRowFor(t, measure);
-  const w = Math.max(m.minW, Math.ceil(textW + iconW + lead + m.padX * 2), image ? image.w + m.padX * 2 : 0, Math.ceil(noteW + m.padX * 2), meta ? meta.w + lead + m.padX * 2 : 0);
+  const metaW = meta ? meta.w + lead + m.padX * 2 : 0;
+  const w = fixed !== undefined
+    ? Math.max(fixed, metaW)
+    : Math.max(m.minW, Math.ceil(textW + iconW + lead + m.padX * 2), image ? image.w + m.padX * 2 : 0, Math.ceil(noteW + m.padX * 2), metaW);
   const h = Math.max(lines.length * lineHeight, icons ? MARKER_SIZE : 0) + m.padY * 2 + imageH + (meta?.h ?? 0) + (noteBlock?.h ?? 0);
   return { w, h, lines, font, fontSize: m.fontSize, lineHeight, padX: m.padX, lead, shape: m.shape, image, imageH, noteBlock, meta };
 }

@@ -2,8 +2,8 @@
 // and edit topic text in place.
 
 import { forwardRef, memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { MapLayout, NodeBox } from '../core/layout';
-import { findTopic, isRoot, type MindMap, type Point, type Topic } from '../core/model';
+import { wrapText, type MapLayout, type NodeBox } from '../core/layout';
+import { clampTopicWidth, findTopic, isRoot, type MindMap, type Point, type Topic } from '../core/model';
 import type { Theme } from '../core/themes';
 import { snappedViewport } from '../core/viewport';
 import { t } from '../i18n';
@@ -116,6 +116,13 @@ interface Props {
   /** Format painter: the next topic click gives it the copied look. */
   painting?: boolean;
   onPaint?(id: string): void;
+  /**
+   * Dragging a selected topic's side grip: `onResizePreview` while dragging
+   * (null when it ends), `onResize` once on release. `undefined` width (a
+   * double-click on a grip) lets the topic fit its text again.
+   */
+  onResizePreview?(id: string, width: number | null): void;
+  onResize?(id: string, width: number | undefined): void;
   /** Other people in a live session and the topic each has selected. */
   peers?: { id: string; name: string; color: string; selectedId?: string | null }[];
 }
@@ -169,6 +176,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     | { kind: 'pan'; sx: number; sy: number; vx: number; vy: number; trail: { x: number; y: number; t: number }[] }
     | { kind: 'topic'; id: string; sx: number; sy: number; ox: number; oy: number; dragging: boolean; group: string[] | null }
     | { kind: 'box'; additive: boolean }
+    | { kind: 'resize'; id: string; sx: number; w0: number; dir: number; w?: number }
     | null
   >(null);
 
@@ -537,6 +545,19 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       if (topicId !== props.noteId) props.onOpenNote(topicId);
       return;
     }
+    const grip = el.closest('[data-resize]');
+    if (topicId && grip && e.button === 0 && !props.readOnly && props.onResize) {
+      const b = layout.byId.get(topicId);
+      if (b) {
+        (e.currentTarget as Element).setPointerCapture(e.pointerId);
+        stopCamera();
+        // A box centred on its spot (the central topic, org chart children)
+        // grows on both sides, so its edge moves half as far: double the pull.
+        const dir = Number(grip.getAttribute('data-resize')) * (b.side === 0 ? 2 : 1);
+        gesture.current = { kind: 'resize', id: topicId, sx: e.clientX, w0: b.w, dir };
+      }
+      return;
+    }
     const relation = el.closest('[data-relation-id]');
     if (relation && e.button === 0) {
       props.onSelectRelation(relation.getAttribute('data-relation-id')!);
@@ -584,6 +605,13 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
       setView((v) => ({ ...v, x: g.vx + e.clientX - g.sx, y: g.vy + e.clientY - g.sy }));
       return;
     }
+    if (g.kind === 'resize') {
+      const dx = (e.clientX - g.sx) / viewRef.current.k;
+      if (g.w === undefined && Math.abs(e.clientX - g.sx) < 3) return;
+      g.w = clampTopicWidth(g.w0 + dx * g.dir);
+      props.onResizePreview?.(g.id, g.w);
+      return;
+    }
     if (g.kind === 'box') {
       const p = toMap(e.clientX, e.clientY);
       setBox((bx) => (bx ? { ...bx, x1: p.x, y1: p.y } : bx));
@@ -616,6 +644,10 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
           kick();
         }
       }
+    }
+    if (g?.kind === 'resize') {
+      if (g.w !== undefined) props.onResize?.(g.id, g.w);
+      props.onResizePreview?.(g.id, null);
     }
     if (g?.kind === 'box') {
       if (box) {
@@ -660,6 +692,11 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     const p = toMap(e.clientX, e.clientY);
     // Pointer capture sends the double-click to the canvas itself, so find the topic by position too.
     const topicId = (e.target as Element).closest('[data-topic-id]')?.getAttribute('data-topic-id') ?? hitTest(p.x, p.y, null)?.id;
+    if (topicId && (e.target as Element).closest('[data-resize]')) {
+      // Double-clicking a width grip: back to fitting the text.
+      if (!props.readOnly) props.onResize?.(topicId, undefined);
+      return;
+    }
     if (topicId && layout.byId.get(topicId)?.topic.innerSize && props.onEnterInner) return props.onEnterInner(topicId);
     if (props.readOnly) return;
     // In a topic that shows its note, double-clicking the note edits the note.
@@ -670,7 +707,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
     else if (!(e.target as Element).closest('[data-relation-id], [data-boundary-id]')) props.onCreateFloating(toMap(e.clientX, e.clientY));
   };
 
-  const drawn = useLayoutMotion(layout, `${map.id}|${props.viewKey ?? ""}`);
+  const drawn = useLayoutMotion(layout, `${map.id}|${props.viewKey ?? ""}`, gesture.current?.kind === 'resize');
   const dragBox = drag ? layout.byId.get(drag.id) : undefined;
   const targetBox = drag?.target ? layout.byId.get(drag.target) : undefined;
   // Flow charts: dropping a step on another merges the paths (Shift moves it).
@@ -689,7 +726,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
         backgroundImage: view.k < 0.3 ? 'none' : `radial-gradient(${theme.grid} 1px, transparent 1px)`,
         backgroundSize: `${20 * view.k}px ${20 * view.k}px`,
         backgroundPosition: `${view.x}px ${view.y}px`,
-        cursor: props.relationFrom || box ? 'crosshair' : props.painting ? BRUSH_CURSOR : gesture.current?.kind === 'pan' ? 'grabbing' : 'default',
+        cursor: gesture.current?.kind === 'resize' ? 'ew-resize' : props.relationFrom || box ? 'crosshair' : props.painting ? BRUSH_CURSOR : gesture.current?.kind === 'pan' ? 'grabbing' : 'default',
       }}
     >
       <svg
@@ -717,6 +754,7 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
             dimIds={dragged ?? props.filterDim}
             viewport={viewport}
             simple={simple}
+            resizable={!props.readOnly && !!props.onResize && !(props.selectedIds && props.selectedIds.size > 1)}
           />}
           {props.peers?.map((p) => {
             const b = p.selectedId ? layout.byId.get(p.selectedId) : undefined;
@@ -834,10 +872,12 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
     el.setSelectionRange(initial === box.topic.text ? 0 : el.value.length, el.value.length);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const lines = value.split('\n');
-  const textW = Math.max(...lines.map((l) => canvasMeasure(l || ' ', box.font)));
   const lead = box.lead ?? 0;
-  const w = Math.max(box.w, textW + box.padX * 2 + lead + 8) * view.k;
+  // A topic with a width set by hand keeps it while typing; the text wraps.
+  const fixed = !!box.topic.width;
+  const lines = fixed ? wrapText(value || ' ', box.font, box.w - box.padX * 2 - lead - 2, canvasMeasure) : value.split('\n');
+  const textW = Math.max(...lines.map((l) => canvasMeasure(l || ' ', box.font)));
+  const w = (fixed ? box.w : Math.max(box.w, textW + box.padX * 2 + lead + 8)) * view.k;
   // The edit box covers the text area only, below any picture.
   const bodyH = box.h - box.imageH - (box.meta?.h ?? 0) - (box.noteBlock?.h ?? 0);
   const padY = (bodyH - box.lineHeight * box.lines.length) / 2;
@@ -887,6 +927,8 @@ function EditBox({ box, view, theme, initial, onCommit, onCancel }: { box: NodeB
         color: text,
         background: fill === 'transparent' ? theme.canvas : fill,
         borderRadius: 8 * view.k,
+        whiteSpace: fixed ? 'pre-wrap' : undefined,
+        overflowWrap: fixed ? 'anywhere' : undefined,
       }}
     />
   );

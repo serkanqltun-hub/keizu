@@ -74,10 +74,11 @@ export function frameAt(next: MapLayout, tracks: Track[], t: number): LayoutFram
 }
 
 /**
- * Returns the layout to draw. `scope` changes (another map) show the new
+ * Returns the layout to draw. `scope` changes (another map) and `instant`
+ * (the user is dragging something that follows the pointer) show the new
  * layout at once.
  */
-export function useLayoutMotion(layout: MapLayout, scope: string): LayoutFrame {
+export function useLayoutMotion(layout: MapLayout, scope: string, instant = false): LayoutFrame {
   const [frame, setFrame] = useState<LayoutFrame>({ layout });
   const shown = useRef<MapLayout>(layout);
   const lastScope = useRef(scope);
@@ -88,7 +89,7 @@ export function useLayoutMotion(layout: MapLayout, scope: string): LayoutFrame {
     const prev = shown.current;
     const sameMap = lastScope.current === scope;
     lastScope.current = scope;
-    const tracks = sameMap && prev !== layout && !reducedMotion() && layout.nodes.length <= MAX_ANIMATED ? planLayoutMotion(prev, layout) : null;
+    const tracks = sameMap && !instant && prev !== layout && !reducedMotion() && layout.nodes.length <= MAX_ANIMATED ? planLayoutMotion(prev, layout) : null;
     if (!tracks) {
       shown.current = layout;
       setFrame({ layout });
