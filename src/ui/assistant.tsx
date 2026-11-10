@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import {
   AiReplyError,
   applySuggestions,
+  REPLY_SCHEMA,
   applyText,
   buildPrompt,
   countSuggestions,
@@ -85,7 +86,9 @@ const STRINGS = {
     thinking: '{who} düşünüyor…',
     cancel: 'İptal',
     suggestions: '{n} öneri',
-    ghostHint: 'Haritada soluk görünenler öneridir. İstemediklerinin işaretini kaldır.',
+    ghostHint: 'Haritada soluk görünenler öneridir; "Ekle"ye basana kadar haritaya yazılmaz. İstemediklerinin işaretini kaldır.',
+    toBranches: 'Dallara dönüştür',
+    toBranchesHint: 'Bu yanıt haritaya bir şey eklemedi. Dal olarak önerilmesini istersen "Dallara dönüştür"e bas.',
     add: 'Ekle ({n})',
     discard: 'At',
     applyTopic: 'Konuya uygula',
@@ -155,7 +158,9 @@ const STRINGS = {
     thinking: '{who} is thinking…',
     cancel: 'Cancel',
     suggestions: '{n} suggestions',
-    ghostHint: 'Faded topics on the map are suggestions. Untick the ones you don\'t want.',
+    ghostHint: 'Faded topics on the map are suggestions; nothing is written to the map until you press "Add". Untick the ones you don\'t want.',
+    toBranches: 'Turn into branches',
+    toBranchesHint: 'This answer didn\'t add anything to the map. Press "Turn into branches" to get it as suggested branches.',
     add: 'Add ({n})',
     discard: 'Discard',
     applyTopic: 'Apply to topic',
@@ -254,10 +259,10 @@ export const openLogin = (provider: Provider) => invoke<void>('ai_login', { prov
 let jobCounter = 0;
 
 /** Sends a prompt; `onJob` gets an id that `cancelJob` stops. */
-export function runPrompt(provider: Provider, prompt: string, onJob?: (job: string) => void): Promise<string> {
+export function runPrompt(provider: Provider, prompt: string, onJob?: (job: string) => void, schema?: string): Promise<string> {
   const job = `job-${Date.now()}-${++jobCounter}`;
   onJob?.(job);
-  return invoke<string>('ai_run', { provider, prompt, job, path: prefs.paths[provider] || null, timeoutSecs: prefs.timeout });
+  return invoke<string>('ai_run', { provider, prompt, job, path: prefs.paths[provider] || null, timeoutSecs: prefs.timeout, schema: schema ?? null });
 }
 
 export const cancelJob = (job: string) => invoke<void>('ai_cancel', { job }).catch(() => {});
@@ -327,7 +332,7 @@ export function useAssistant(getMap: () => MindMap, commit: (next: MindMap, sele
     const id = ++runId.current;
     const { prompt, refs } = buildPrompt(map, topicId, action, { question, lang: prefs.lang, history: chatRef.current, today: today() });
     setState({ status: 'running', action, topicId, provider, question });
-    runPrompt(provider, prompt, (j) => (job.current = j))
+    runPrompt(provider, prompt, (j) => (job.current = j), REPLY_SCHEMA)
       .then((raw) => {
         if (id !== runId.current) return;
         const reply = parseReply(raw, refs, topicId, action);
@@ -496,8 +501,12 @@ export function AssistantPanel({ map, topicId, assistant, onClose }: PanelProps)
         {reply.text && (
           <>
             <p className="ai-answer">{reply.text}</p>
+            {inChat && !n && <p className="muted small">{s('toBranchesHint')}</p>}
             <div className="row">
-              <button className="btn sm primary" onClick={assistant.applyAnswer}>{textToTopic ? s('applyTopic') : s('addNote')}</button>
+              {inChat && !n && (
+                <button className="btn sm primary" onClick={() => assistant.run('toBranches', state.topicId)}>{s('toBranches')}</button>
+              )}
+              <button className={`btn sm ${inChat && !n ? '' : 'primary'}`} onClick={assistant.applyAnswer}>{textToTopic ? s('applyTopic') : s('addNote')}</button>
               <button className="btn sm" onClick={() => void navigator.clipboard?.writeText(reply.text!)}>{s('copy')}</button>
               {!n && <button className="btn sm" onClick={assistant.discard}>{s('discard')}</button>}
             </div>

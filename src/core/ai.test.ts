@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { AiReplyError, applySuggestions, applyText, buildPrompt, countSuggestions, parseReply, suggestionKey } from './ai';
+import { AiReplyError, REPLY_SCHEMA, applySuggestions, applyText, buildPrompt, countSuggestions, parseReply, suggestionKey } from './ai';
 import { addFlowLink, addRelation, createMap, createTopic, findTopic, updateTopic, type MindMap } from './model';
 
 function sample(): MindMap {
@@ -100,7 +100,41 @@ describe('parseReply', () => {
   it('drops empty and junk items and limits size', () => {
     const many = { add: [{ parent: 't1', topics: [...Array.from({ length: 200 }, (_, i) => ({ text: `T${i}` })), { text: '  ' }, 42, null] }] };
     const r = parseReply(JSON.stringify(many), refs, branch.id, 'ideas');
-    expect(countSuggestions(r.additions)).toBe(60);
+    expect(countSuggestions(r.additions)).toBe(120);
+  });
+
+  it('reads the nested "add" object some answers use', () => {
+    // Real Claude reply to "turn this story into a map" before the prompt fix.
+    const raw = '{"text":"Hikâyeyi dallara böldüm.","add":{"text":"Hikâye haritası","add":[{"parent":"t1","topics":[{"text":"Karakterler","children":[{"text":"Meryem\'in sırrını yaz","task":true,"children":[]}]}]}]}}';
+    const r = parseReply(raw, refs, branch.id, 'ask');
+    expect(r.text).toBe('Hikâyeyi dallara böldüm.');
+    expect(r.additions[0].parentId).toBe(m.roots[0].id);
+    expect(r.additions[0].topics[0].children[0]).toMatchObject({ text: "Meryem'in sırrını yaz", task: true });
+    expect(parseReply('{"add":{"parent":"t2","topics":["A"]}}', refs, branch.id, 'ideas').additions[0].parentId).toBe(branch.id);
+  });
+
+  it('does not show broken JSON as an answer', () => {
+    expect(() => parseReply('{"text":"Yarım kal', refs, branch.id, 'ask')).toThrow(AiReplyError);
+  });
+});
+
+describe('reply format', () => {
+  it('asks for a list under "add" and tells the model it only suggests', () => {
+    const m = sample();
+    const { prompt } = buildPrompt(m, m.roots[0].id, 'ask', { question: 'Bunu haritaya dönüştür' });
+    expect(prompt).toContain('"add" must be a list');
+    expect(prompt).toContain('never say that you added');
+    expect(prompt).not.toMatch(/"add": \{/);
+    const schema = JSON.parse(REPLY_SCHEMA);
+    expect(schema.properties.add.type).toBe('array');
+  });
+
+  it('turns the last exchange into branches', () => {
+    const m = sample();
+    const history = [{ question: 'Hikâyem: dört yolcu…', answer: 'Güzel bir öncül.' }];
+    const { prompt } = buildPrompt(m, m.roots[0].id, 'toBranches', { history });
+    expect(prompt).toContain('User: Hikâyem: dört yolcu…');
+    expect(prompt).toContain('"parent":"t1"');
   });
 });
 

@@ -266,19 +266,59 @@ pub async fn ai_detect(app: AppHandle, paths: Option<HashMap<String, String>>) -
     .unwrap_or_default()
 }
 
-/// Sends a prompt to the chosen tool and returns its answer.
+/// The answer inside Claude Code's `--output-format json` envelope: the
+/// schema-checked object when there is one, otherwise the plain result.
+fn claude_envelope(stdout: &str) -> Result<String, String> {
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).map_err(|_| stdout.trim().chars().take(1500).collect::<String>())?;
+    let result = v.get("result").and_then(|r| r.as_str()).unwrap_or("").to_string();
+    if v.get("is_error").and_then(|e| e.as_bool()) == Some(true) {
+        return Err(if result.trim().is_empty() { "error".into() } else { result.chars().take(1500).collect() });
+    }
+    match v.get("structured_output") {
+        Some(so) if so.is_object() => Ok(so.to_string()),
+        _ if !result.trim().is_empty() => Ok(result),
+        _ => Err("empty".into()),
+    }
+}
+
+/// Whether a failed run looks like an older tool that doesn't know an option.
+fn unknown_option(out: &RunOutput) -> bool {
+    let e = format!("{}{}", out.stderr, out.stdout).to_lowercase();
+    e.contains("unknown option") || e.contains("--tools") || e.contains("--json-schema") || e.contains("--strict-mcp-config") || e.contains("unexpected argument")
+}
+
+/// Sends a prompt to the chosen tool and returns its answer. With `schema`
+/// (a JSON Schema), Claude Code is asked for an answer that matches it.
 #[tauri::command]
-pub async fn ai_run(app: AppHandle, provider: String, prompt: String, job: String, path: Option<String>, timeout_secs: Option<u64>) -> Result<String, String> {
+pub async fn ai_run(app: AppHandle, provider: String, prompt: String, job: String, path: Option<String>, timeout_secs: Option<u64>, schema: Option<String>) -> Result<String, String> {
     let p = Provider::parse(&provider)?;
     let exe = find_cli(p, path.as_deref()).ok_or_else(|| "not-installed".to_string())?;
     let timeout = Duration::from_secs(timeout_secs.unwrap_or(120).clamp(10, 600));
     tauri::async_runtime::spawn_blocking(move || {
         let out = match p {
             Provider::Claude => {
-                // Print mode, plain text, no tools. Older versions without
-                // --tools get one retry without it.
+                // Print mode, no tools, no MCP servers, no slash commands,
+                // nothing saved: Claude only answers, it can't act on anything.
+                // With a schema the answer is checked against it. Older
+                // versions that don't know an option fall back step by step.
+                if let Some(schema) = schema.as_deref().filter(|s| !s.trim().is_empty()) {
+                    let args = [
+                        "-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--no-session-persistence", "--disable-slash-commands", "--json-schema", schema,
+                    ];
+                    match run_process(&app, &job, &exe, &args, &prompt, timeout) {
+                        Ok(o) if o.code == Some(0) => return claude_envelope(&o.stdout),
+                        Ok(o) if !unknown_option(&o) => {
+                            let msg = if o.stderr.trim().is_empty() { o.stdout } else { o.stderr };
+                            return Err(msg.trim().chars().take(1500).collect());
+                        }
+                        Err(e) if e == "cancelled" || e == "timeout" => return Err(e),
+                        // Unknown option, or the schema couldn't be passed on
+                        // the command line (e.g. through a .cmd shim): plain mode.
+                        _ => {}
+                    }
+                }
                 let first = run_process(&app, &job, &exe, &["-p", "--output-format", "text", "--tools", ""], &prompt, timeout)?;
-                if first.code != Some(0) && (first.stderr.contains("--tools") || first.stderr.contains("unknown option")) {
+                if first.code != Some(0) && unknown_option(&first) {
                     run_process(&app, &job, &exe, &["-p", "--output-format", "text"], &prompt, timeout)?
                 } else {
                     first
@@ -338,5 +378,22 @@ pub fn ai_login(provider: String, path: Option<String>) -> Result<(), String> {
             }
         }
         Err("no-terminal".into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_json_envelope() {
+        let ok = r#"{"type":"result","is_error":false,"result":"{\"text\":\"x\"}","structured_output":{"text":"hi","add":[]}}"#;
+        let v: serde_json::Value = serde_json::from_str(&claude_envelope(ok).unwrap()).unwrap();
+        assert_eq!(v, serde_json::json!({"text":"hi","add":[]}));
+        let plain = r#"{"is_error":false,"result":"{\"text\":\"y\"}"}"#;
+        assert_eq!(claude_envelope(plain).unwrap(), r#"{"text":"y"}"#);
+        let err = r#"{"is_error":true,"result":"Not logged in"}"#;
+        assert_eq!(claude_envelope(err).unwrap_err(), "Not logged in");
+        assert!(claude_envelope("not json").is_err());
     }
 }

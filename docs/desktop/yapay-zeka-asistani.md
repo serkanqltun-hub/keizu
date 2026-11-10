@@ -22,9 +22,10 @@ Keizu aracı kendisi bulamazsa "Gelişmiş: aracın yolu" alanına tam yolunu ya
 - **Sıradaki adımlar**: asistan tüm haritaya, açık/bitmiş görevlere ve tarihlere bakar; durumu ve eksikleri yazar, sıradaki adımları görev olarak önerir.
 - Soru kutusu bir sohbettir: "peki onu biraz aç" gibi devam soruları sorabilirsin. Sohbet harita açık kaldığı sürece hatırlanır; "Yeni sohbet" ile sıfırlanır.
 - Öneriler haritada soluk görünür. İstemediklerinin işaretini kaldır, **Ekle** de. Onaylamadan haritaya hiçbir şey yazılmaz; eklenenler `Ctrl+Z` ile geri alınır.
+- Bir metni (ör. bir hikâye ya da toplantı notu) soru kutusuna yapıştırıp "haritaya dönüştür" diyebilirsin; dallar öneri olarak gelir. Yanıt yalnızca yazı olarak geldiyse altındaki **Dallara dönüştür** düğmesi aynı konuşmayı dal önerilerine çevirir.
 
 ## Gizlilik ve güvenlik
 
 - Açık haritanın metni (notlar, görevler, etiketler, oklar dahil) seçtiğin araca gider; seçili dal "odak" olarak işaretlenir. Çok büyük haritalarda odak dışındaki dallar kısaltılır. Başka haritalar gönderilmez.
-- Keizu yalnızca `claude` ve `gemini` programlarını sabit argümanlarla çalıştırır. Harita metni komut satırına değil, standart girişe verilir. Araçlar boş bir geçici klasörde çalışır; Claude Code'un kendi araçları (dosya, komut) kapalı açılır.
+- Keizu yalnızca `claude` ve `gemini` programlarını sabit argümanlarla çalıştırır. Harita metni komut satırına değil, standart girişe verilir. Araçlar boş bir geçici klasörde çalışır; Claude Code'un kendi araçları (dosya, komut), MCP sunucuları ve eğik çizgi komutları kapalı açılır, oturum kaydedilmez; yanıt belirli bir JSON şemasına uymak zorundadır.
 - Web sürümü bilgisayardaki programları başlatamadığı için asistan yalnızca masaüstünde çalışır.
