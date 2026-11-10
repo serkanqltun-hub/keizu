@@ -81,7 +81,7 @@ import { FormatPanel } from './FormatPanel';
 import * as I from './Icons';
 import { MapCanvas, type CanvasHandle, type CanvasTarget, type View as CanvasView } from './MapCanvas';
 import { ContextMenu, tidy, type CtxItem } from './ContextMenu';
-import type { NoteSave } from './NotePopover';
+import type { NoteSave } from './NoteDialog';
 import { toggleTask as toggleNoteLine } from '../core/richText';
 import { canvasMeasure } from './measure';
 import { OutlineView } from './OutlineView';
@@ -225,7 +225,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   const [presenting, setPresenting] = useState(false);
   // The open right-click menu: what it is for and where.
   const [ctx, setCtx] = useState<{ x: number; y: number; target: CanvasTarget; kb?: boolean } | null>(null);
-  // Topic whose note card is open on the canvas.
+  // Topic whose note window is open.
   const [noteId, setNoteIdRaw] = useState<string | null>(null);
   // Whether the card opens in the editor (F4) or shows the note formatted (icon click).
   const [noteEdit, setNoteEdit] = useState(false);
@@ -481,12 +481,12 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     if (select !== undefined) setSelectedId(select);
   }, []);
 
-  // The note card belongs to the selected topic on the map.
+  // The note window belongs to the selected topic on the map.
   useEffect(() => {
     if (noteId && (selectedId !== noteId || view !== 'map')) setNoteId(null);
   }, [selectedId, view, noteId]);
 
-  // Saves a note card. Works on the newest map, since the card saves as it
+  // Saves the note window. Works on the newest map, since the window saves as it
   // closes, possibly in the same moment as another change.
   const saveNote = useCallback((id: string, save: NoteSave) => {
     if (readOnlyRef.current) return;

@@ -27,7 +27,7 @@ Açık kaynak, önce yerel çalışan bir zihin haritası uygulaması. Web'de ve
 - Sürükle-bırak ile konu taşıma; boş alana bırakınca serbest konu olur
 - Dal daraltma, geri al / yinele, kopyala / kes / yapıştır
 - 4 tema (Taze, Gece, Kâğıt, Sade), dal stilleri (eğri, dirsek, düz), konu şekli ve rengi
-- İşaretler (öncelik, ilerleme, bayrak, simge) ve konu notları: konunun yanında açılan not kartı (F4 ya da konudaki not simgesine tıkla), istenirse not konunun içinde görünür; Markdown ve OPML dışa/içe aktarmada notlar korunur, sunumda o konunun notu altta çıkar
+- İşaretler (öncelik, ilerleme, bayrak, simge) ve konu notları: ekranın ortasında açılan büyük not penceresi (F4 ya da konudaki not simgesine tıkla; düzenlerken yanda canlı önizleme), istenirse not konunun içinde görünür; Markdown ve OPML dışa/içe aktarmada notlar korunur, sunumda o konunun notu altta çıkar
 - Konulara görsel ekleme (PNG, JPEG, GIF, WebP)
 - Odak modu (F6): bir dalın içine gir, haritada yalnız o dal kalsın; üstteki yol çubuğundan üst dallara dön, Esc ile çık
 - Sınır ve özet: kardeş dalları etiketli bir çerçeveyle grupla (Ctrl/⌘ + Shift + B) ya da parantezle toplayan bir özet konusu ekle (Ctrl/⌘ + Shift + G); kapsam panelden büyütülüp küçültülür, `.keizu` dosyasında saklanır, XMind'den içe aktarılır

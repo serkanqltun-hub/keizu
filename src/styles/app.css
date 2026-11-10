@@ -90,15 +90,27 @@ kbd { font: 600 11px var(--font); padding: 2px 6px; border: 1px solid var(--line
 .canvas-svg { width: 100%; height: 100%; display: block; }
 .edit-box { position: absolute; z-index: 3; resize: none; overflow: hidden; border: 2px solid var(--accent); outline: 0; margin: 0; box-shadow: 0 4px 16px rgba(16, 24, 40, 0.15); white-space: pre; }
 /* note card on the canvas */
-.note-pop { position: absolute; z-index: 4; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 28px rgba(16, 24, 40, 0.18); }
-.note-pop-head { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 600; }
-.note-pop-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
-.note-pop textarea { width: 100%; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; line-height: 1.5; background: var(--bg, transparent); color: inherit; }
-.note-pop textarea:focus { outline: 0; border-color: var(--accent); }
-.note-pop-read { max-height: 360px; overflow-y: auto; font-size: 13px; line-height: 1.5; cursor: text; border-radius: 8px; padding: 2px 2px; }
+.note-backdrop { z-index: 25; align-items: center; padding: 24px; }
+.note-dialog { width: min(1040px, 100%); min-width: min(700px, 100%); height: min(80vh, 860px); display: flex; flex-direction: column; gap: 12px; padding: 16px 20px 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 24px 48px rgba(16, 24, 40, 0.25); animation: kz-pop var(--dur-smooth) var(--ease); }
+.note-dialog:focus { outline: 0; }
+.note-dialog-head { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 15px; font-weight: 600; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.note-dialog-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-size: 17px; }
+.note-dialog-body { flex: 1; min-height: 0; font-size: 15px; line-height: 1.6; }
+.note-dialog-read { overflow-y: auto; cursor: text; padding: 4px 6px; max-width: 760px; width: 100%; margin: 0 auto; }
+.note-dialog-body.split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+.note-dialog-body.split .note-editor { min-height: 0; }
+.note-dialog textarea { flex: 1; min-height: 0; width: 100%; box-sizing: border-box; resize: none; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: inherit; font-size: 14px; line-height: 1.6; background: var(--canvas); color: inherit; }
+.note-dialog textarea:focus { outline: 0; border-color: var(--accent); }
+.note-dialog-preview { overflow-y: auto; padding: 8px 12px; border-radius: 8px; background: var(--soft); }
+.note-dialog-foot { padding-top: 10px; border-top: 1px solid var(--line); }
+@media (max-width: 760px) {
+  .note-backdrop { padding: 8px; }
+  .note-dialog { height: calc(100vh - 16px); padding: 12px; }
+  .note-dialog-body.split { grid-template-columns: minmax(0, 1fr); }
+  .note-dialog-preview { display: none; }
+}
 .note-pop-mode { width: auto; padding: 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); }
 .note-pop-mode.on, .note-pop-mode:hover { color: var(--accent); }
-.note-pop:focus { outline: 0; }
 .note-editor { display: flex; flex-direction: column; gap: 4px; }
 .note-fmt { display: flex; flex-wrap: wrap; gap: 0; margin: 0 -4px; }
 .note-fmt .ib { width: 25px; height: 26px; font-size: 13px; color: var(--muted); }
@@ -458,7 +470,7 @@ mark { background: color-mix(in srgb, #ffd43b 55%, transparent); color: inherit;
 @keyframes kz-pop { from { opacity: 0; transform: translateY(-4px) scale(0.98); } to { opacity: 1; transform: none; } }
 .outline-panel { animation: kz-slide-left var(--dur-smooth) var(--ease); }
 .panel { animation: kz-slide-right var(--dur-smooth) var(--ease); }
-.menu, .note-pop, .toast { animation: kz-pop var(--dur-smooth) var(--ease); }
+.menu, .toast { animation: kz-pop var(--dur-smooth) var(--ease); }
 .toast { animation-name: kz-fade; }
 [data-selection] { animation: kz-fade var(--dur-instant) ease-out; }
 @media (prefers-reduced-motion: reduce) { html:not(.kz-motion-full) * { animation: none !important; transition: none !important; } }
