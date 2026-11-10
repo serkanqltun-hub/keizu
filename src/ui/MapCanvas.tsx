@@ -9,7 +9,7 @@ import { snappedViewport } from '../core/viewport';
 import { t } from '../i18n';
 import { MapSvg, SELECT_COLOR, TopicView, nodeColors } from './MapSvg';
 import { canvasMeasure } from './measure';
-import { NotePopover, type NoteSave } from './NotePopover';
+import { NoteDialog, type NoteSave } from './NoteDialog';
 import { getMotionPrefs, isMouseWheel, reducedMotion, wheelZoomFactor } from './motion';
 import { useLayoutMotion } from './useLayoutMotion';
 
@@ -83,12 +83,12 @@ interface Props {
   onTagClick?(tag: string): void;
   /** Topics faded by the tag / task filter. */
   filterDim?: Set<string>;
-  /** Topic whose note card is open on the canvas. */
+  /** Topic whose note window is open. */
   noteId?: string | null;
   onOpenNote?(id: string): void;
   onCloseNote?(): void;
   onSaveNote?(id: string, save: NoteSave): void;
-  /** Open the note card in the editor rather than formatted. */
+  /** Open the note window in the editor rather than formatted. */
   noteEdit?: boolean;
   /** Tick or untick a checklist item in a note shown inside its topic. */
   onToggleNoteTask?(id: string, line: number): void;
@@ -846,12 +846,10 @@ export const MapCanvas = forwardRef<CanvasHandle, Props>(function MapCanvas(prop
           onCancel={props.onCancelEdit}
         />
       )}
-      {noteBox && size.w > 0 && (
-        <NotePopover
+      {noteBox && (
+        <NoteDialog
           key={noteBox.id}
-          box={noteBox}
-          view={view}
-          size={size}
+          topic={noteBox.topic}
           readOnly={props.readOnly}
           edit={props.noteEdit}
           onSave={(save) => props.onSaveNote?.(noteBox.id, save)}
