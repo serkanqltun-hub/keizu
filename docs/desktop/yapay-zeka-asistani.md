@@ -5,7 +5,9 @@ Masaüstü Keizu, bilgisayarına kurduğun ve **kendi aboneliğinle giriş yapt�
 | Araç | Abonelik | Kurulum |
 | --- | --- | --- |
 | Claude Code | Claude Pro / Max | Windows (PowerShell): `irm https://claude.ai/install.ps1 \| iex` · macOS/Linux: `curl -fsSL https://claude.ai/install.sh \| bash` |
-| Gemini CLI | Google hesabı | `npm install -g @google/gemini-cli` (Node.js 20+) |
+| Gemini CLI | Ücretli Gemini API anahtarı ya da kurumsal lisans (aşağıdaki nota bak) | `npm install -g @google/gemini-cli` (Node.js 20+) |
+
+> **Not (Kasım 2026):** Google, Haziran 2026'dan beri Gemini CLI'ye kişisel Google hesabıyla (ücretsiz ya da Google AI Pro) girişi kapattı. Giriş denemesi "This client is no longer supported for Gemini Code Assist for individuals" hatası verir. Google'ın yerine önerdiği Antigravity CLI (`agy`) için şartlar, başka uygulamalardan kullanıma izin verip vermediği konusunda belirsiz; bu yüzden Keizu onu desteklemiyor. Kişisel abonelikle asistan için Claude Code kullan.
 
 ## Kurulum
 
