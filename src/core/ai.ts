@@ -8,10 +8,10 @@ import { pasteTopics } from './bulk';
 import { createTopic, findParent, findTopic, updateTopic, type MindMap, type Topic } from './model';
 import { isDate, priorityOf } from './tasks';
 
-export type AiAction = 'ideas' | 'expand' | 'summarize' | 'rewrite' | 'translateTr' | 'translateEn' | 'fromNote' | 'nextSteps' | 'ask';
+export type AiAction = 'ideas' | 'expand' | 'summarize' | 'rewrite' | 'translateTr' | 'translateEn' | 'fromNote' | 'nextSteps' | 'ask' | 'toBranches';
 
 /** Actions that add branches; the rest answer with text. */
-export const BRANCH_ACTIONS: AiAction[] = ['ideas', 'expand', 'fromNote'];
+export const BRANCH_ACTIONS: AiAction[] = ['ideas', 'expand', 'fromNote', 'toBranches'];
 
 /** A suggested topic with its own suggested children. */
 export interface AiTopic {
@@ -44,9 +44,9 @@ interface Context {
 }
 
 const MAX_CONTEXT = 16000;
-const MAX_TOPICS = 60;
+const MAX_TOPICS = 120;
 const MAX_TEXT = 240;
-const MAX_DEPTH = 4;
+const MAX_DEPTH = 5;
 const MAX_NOTE = 600;
 
 const oneLine = (s: string) => s.replace(/\s*\n\s*/g, ' ').trim();
@@ -139,8 +139,38 @@ const TASKS: Record<AiAction, string> = {
   translateEn: 'Translate the text of the FOCUS topic [F] into English. Answer with {"text":"…"} holding only the translation.',
   nextSteps:
     'Look at the whole map with the FOCUS branch [F] as the area of interest: open and done tasks, due dates, empty branches and gaps. In "text", say briefly where things stand, what is missing or blocked, and what the next steps are (a short paragraph plus up to 5 short lines starting with "- "). In "add", suggest 3 to 5 concrete next-step tasks, each under the topic it belongs to, with "task":true and, when a date makes sense, "due":"YYYY-MM-DD". Answer with {"text":"…","add":[{"parent":"<ref>","topics":[{"text":"…","task":true,"children":[]}]}]}.',
-  ask: 'Answer the user\'s question about this mind map. Use the whole map; the FOCUS branch is what the user has selected. Answer with {"text":"…"}. If the answer is best given as new topics, also include "add": {"text":"…","add":[{"parent":"<ref>","topics":[{"text":"…","children":[]}]}]}; mark a topic that is something to do with "task":true.',
+  ask: 'Answer the user\'s message about this mind map. Use the whole map; the FOCUS branch is what the user has selected. Put your answer in "text". When the user asks for topics, branches or tasks, or to turn something into a map, or when the answer is best given as new topics, also fill "add" with the suggested topics. Answer with {"text":"…"} or {"text":"…","add":[{"parent":"<ref>","topics":[{"text":"…","children":[…]}]}]}; mark a topic that is something to do with "task":true.',
+  toBranches:
+    'Turn the last exchange of the conversation above (the user\'s message and the assistant\'s answer) into a well-structured tree of short topics under the FOCUS topic [F], at most 4 levels deep; mark things still to do with "task":true. In "text", say in one sentence what the suggested branches cover. Answer with {"text":"…","add":[{"parent":"F","topics":[{"text":"…","children":[…]}]}]}.',
 };
+
+/** The reply format as a JSON Schema (tools that can check it use it). */
+export const REPLY_SCHEMA = JSON.stringify({
+  type: 'object',
+  properties: {
+    text: { type: 'string' },
+    add: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: { parent: { type: 'string' }, topics: { type: 'array', items: { $ref: '#/$defs/topic' } } },
+        required: ['parent', 'topics'],
+      },
+    },
+  },
+  $defs: {
+    topic: {
+      type: 'object',
+      properties: {
+        text: { type: 'string' },
+        task: { type: 'boolean' },
+        due: { type: 'string' },
+        children: { type: 'array', items: { $ref: '#/$defs/topic' } },
+      },
+      required: ['text'],
+    },
+  },
+});
 
 /** One finished exchange of the panel's conversation. */
 export interface ChatTurn {
@@ -172,21 +202,22 @@ export function buildPrompt(map: MindMap, topicId: string, action: AiAction, opt
         : opts.lang === 'en'
           ? 'Write all text in English.'
           : 'Write all text in the same language as the mind map.';
-  const chat = action === 'ask' || action === 'nextSteps' ? (opts.history ?? []).slice(-MAX_HISTORY) : [];
+  const chat = action === 'ask' || action === 'nextSteps' || action === 'toBranches' ? (opts.history ?? []).slice(-MAX_HISTORY) : [];
   const parts = [
     'You are the assistant inside Keizu, a mind mapping app. You only produce text; do not use tools, read files or run commands.',
+    'You cannot change the map yourself. Topics you put in "add" are shown to the user as suggestions, and they are added only if the user accepts them. So in "text" never say that you added, created, converted or deleted anything; say what you suggest instead (e.g. "I suggest these branches").',
     `Mind map: "${oneLine(map.title)}"`,
     opts.today ? `Today is ${opts.today}.` : '',
     'The whole map (each topic has a ref in brackets; "[ ]" is an open task, "[x]" a done one):',
     ctx.outline,
     ctx.links.length ? `Links between topics:\n${ctx.links.join('\n')}` : '',
     `The FOCUS topic is [${ctx.focusRef}].`,
-    chat.length ? `Earlier in this conversation:\n${chat.map((c) => `User: ${oneLine(c.question)}\nAssistant: ${oneLine(c.answer).slice(0, 1500)}`).join('\n')}` : '',
+    chat.length ? `Earlier in this conversation:\n${chat.map((c) => `User: ${oneLine(c.question).slice(0, 4000)}\nAssistant: ${oneLine(c.answer).slice(0, 1500)}`).join('\n')}` : '',
     '',
     `Task: ${TASKS[action].replace(/\[F\]/g, `[${ctx.focusRef}]`).replace(/"parent":"F"/g, `"parent":"${ctx.focusRef}"`)}`,
     action === 'ask' && opts.question ? `User's question: ${opts.question.trim()}` : '',
     lang,
-    'Reply with only one JSON object and nothing else: no explanation, no Markdown fences.',
+    'Reply with only one JSON object and nothing else: no explanation, no Markdown fences. "add" must be a list, and each topic\'s "children" a list of topics.',
   ];
   return { prompt: parts.filter((p) => p !== '').join('\n'), refs: ctx.refs };
 }
@@ -235,7 +266,8 @@ export function parseReply(raw: string, refs: Map<string, string>, fallbackId: s
   const wantsBranches = BRANCH_ACTIONS.includes(action);
   if (!data || typeof data !== 'object') {
     const plain = raw.trim();
-    if (!wantsBranches && plain) return { text: plain, additions: [] };
+    // Broken JSON isn't shown as an answer: the user would only see code.
+    if (!wantsBranches && plain && !plain.replace(/^```(?:json)?\s*/i, '').startsWith('{')) return { text: plain, additions: [] };
     throw new AiReplyError('unreadable');
   }
   const budget = { left: MAX_TOPICS };
@@ -244,15 +276,29 @@ export function parseReply(raw: string, refs: Map<string, string>, fallbackId: s
     if (!topics.length) return;
     byParent.set(parentId, [...(byParent.get(parentId) ?? []), ...topics]);
   };
-  if (Array.isArray(data.add)) {
-    for (const a of data.add) {
-      if (!a || typeof a !== 'object') continue;
-      const ref = String((a as { parent?: unknown }).parent ?? '').replace(/[[\]\s]/g, '');
-      push(refs.get(ref) ?? fallbackId, readTopics((a as { topics?: unknown }).topics, 1, budget));
+  // The expected shape is {"add":[{"parent","topics"}]}, but models sometimes
+  // nest it ({"add":{"add":[…]}}), give one group as an object, or list topics
+  // directly; all of these are read.
+  const readAdd = (v: unknown, depth: number): void => {
+    if (depth > 3 || !v) return;
+    if (Array.isArray(v)) {
+      for (const a of v) {
+        if (!a || typeof a !== 'object') continue;
+        const g = a as { parent?: unknown; topics?: unknown; add?: unknown };
+        if (Array.isArray(g.topics)) {
+          const ref = String(g.parent ?? '').replace(/[[\]\s]/g, '');
+          push(refs.get(ref) ?? fallbackId, readTopics(g.topics, 1, budget));
+        } else if (g.add) readAdd(g.add, depth + 1);
+        else push(fallbackId, readTopics([a], 1, budget));
+      }
+    } else if (typeof v === 'object') {
+      const g = v as { topics?: unknown; add?: unknown };
+      if (Array.isArray(g.topics)) readAdd([v], depth + 1);
+      else readAdd(g.add, depth + 1);
     }
-  } else if (Array.isArray(data.topics)) {
-    push(fallbackId, readTopics(data.topics, 1, budget));
-  }
+  };
+  readAdd(data.add, 0);
+  if (!byParent.size && Array.isArray(data.topics)) push(fallbackId, readTopics(data.topics, 1, budget));
   const additions = [...byParent].map(([parentId, topics]) => ({ parentId, topics }));
   const text = typeof data.text === 'string' && data.text.trim() ? data.text.trim() : undefined;
   if (!text && !additions.length) throw new AiReplyError('empty');
