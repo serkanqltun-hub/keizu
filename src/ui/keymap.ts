@@ -71,7 +71,8 @@ export type CommandId =
   | 'assistant'
   | 'aiIdeas'
   | 'aiExpand'
-  | 'aiSummarize';
+  | 'aiSummarize'
+  | 'aiNextSteps';
 
 
 export interface CommandDef {
@@ -131,6 +132,7 @@ export const COMMANDS: CommandDef[] = [
   { id: 'aiIdeas', keys: [], group: 'edit' },
   { id: 'aiExpand', keys: [], group: 'edit' },
   { id: 'aiSummarize', keys: [], group: 'edit' },
+  { id: 'aiNextSteps', keys: [], group: 'edit' },
   { id: 'zoomIn', keys: ['Mod+=', 'Mod++'], group: 'view' },
   { id: 'zoomOut', keys: ['Mod+-'], group: 'view' },
   { id: 'fit', keys: ['Mod+0'], group: 'view' },

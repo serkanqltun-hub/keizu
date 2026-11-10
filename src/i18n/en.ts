@@ -107,6 +107,7 @@ export const en: Record<MessageKey, string> = {
   'cmd.aiIdeas': "Assistant: brainstorm",
   'cmd.aiExpand': "Assistant: expand branch",
   'cmd.aiSummarize': "Assistant: summarize branch",
+  'cmd.aiNextSteps': "Assistant: next steps",
   'tb.assistant': "Assistant",
   'ctx.assistant': "Assistant",
   'cmd.tag': "Add tag",

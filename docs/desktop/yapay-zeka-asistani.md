@@ -19,10 +19,12 @@ Keizu aracı kendisi bulamazsa "Gelişmiş: aracın yolu" alanına tam yolunu ya
 
 - Bir konuya sağ tıkla → **Asistan**: fikir üret, dalı genişlet, özetle, yeniden yaz, nottan dallar, çeviri.
 - Araç çubuğunda **Asistan** ya da `Ctrl+J`: yan panel; serbest soru da sorabilirsin.
+- **Sıradaki adımlar**: asistan tüm haritaya, açık/bitmiş görevlere ve tarihlere bakar; durumu ve eksikleri yazar, sıradaki adımları görev olarak önerir.
+- Soru kutusu bir sohbettir: "peki onu biraz aç" gibi devam soruları sorabilirsin. Sohbet harita açık kaldığı sürece hatırlanır; "Yeni sohbet" ile sıfırlanır.
 - Öneriler haritada soluk görünür. İstemediklerinin işaretini kaldır, **Ekle** de. Onaylamadan haritaya hiçbir şey yazılmaz; eklenenler `Ctrl+Z` ile geri alınır.
 
 ## Gizlilik ve güvenlik
 
-- Yalnızca seçili dalın metni (ve üst başlıkların adları) seçtiğin araca gider.
+- Açık haritanın metni (notlar, görevler, etiketler, oklar dahil) seçtiğin araca gider; seçili dal "odak" olarak işaretlenir. Çok büyük haritalarda odak dışındaki dallar kısaltılır. Başka haritalar gönderilmez.
 - Keizu yalnızca `claude` ve `gemini` programlarını sabit argümanlarla çalıştırır. Harita metni komut satırına değil, standart girişe verilir. Araçlar boş bir geçici klasörde çalışır; Claude Code'un kendi araçları (dosya, komut) kapalı açılır.
 - Web sürümü bilgisayardaki programları başlatamadığı için asistan yalnızca masaüstünde çalışır.

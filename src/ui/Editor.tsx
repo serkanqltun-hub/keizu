@@ -443,7 +443,10 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
   // Suggestions arrived: bring the branch into view so they can be seen.
   const aiState = assistant.state;
   useEffect(() => {
-    if (aiState.status === 'done' && aiState.reply.additions.length) canvas.current?.centerOn(aiState.topicId);
+    if (aiState.status !== 'done' || !aiState.reply.additions.length) return;
+    // Suggestions under several topics: show the whole map; else centre the one topic.
+    if (aiState.reply.additions.length > 1) canvas.current?.fit();
+    else canvas.current?.centerOn(aiState.reply.additions[0].parentId);
   }, [aiState]);
   const closeAssistant = () => {
     setAiOpen(false);
@@ -1240,7 +1243,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         label: t('ctx.assistant'),
         icon: <I.Sparkle size={16} />,
         items: [
-          ...(['ideas', 'expand', 'summarize', 'rewrite', 'fromNote', 'translateTr', 'translateEn'] as AiAction[])
+          ...(['nextSteps', 'ideas', 'expand', 'summarize', 'rewrite', 'fromNote', 'translateTr', 'translateEn'] as AiAction[])
             .filter((a) => a !== 'fromNote' || !!tp.note?.trim())
             .map((a): CtxItem => ({ type: 'item', id: `ai-${a}`, label: actionLabel(a), run: () => aiRun(a, id) })),
           { type: 'sep' },
@@ -1419,6 +1422,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
     aiIdeas: { run: () => selectedId && aiRun('ideas', selectedId), enabled: aiAvailable && !!selectedId && !readOnly },
     aiExpand: { run: () => selectedId && aiRun('expand', selectedId), enabled: aiAvailable && !!selectedId && !readOnly },
     aiSummarize: { run: () => selectedId && aiRun('summarize', selectedId), enabled: aiAvailable && !!selectedId && !readOnly },
+    aiNextSteps: { run: () => aiRun('nextSteps', selectedId ?? mainId), enabled: aiAvailable && !readOnly },
     viewCanvas: { run: () => setKind(kind === 'map' ? 'canvas' : 'map'), enabled: !readOnly },
     viewBoth: { run: () => setKind(kind === 'both' ? 'map' : 'both'), enabled: !readOnly },
     addCanvas: {
@@ -2068,7 +2072,7 @@ export function Editor({ initial, store, fontsReady, focusId, onBack, onOpenMap,
         )}
 
         {aiOpen && !historyOpen && !readOnly && (
-          <AssistantPanel map={map} topicId={selectedId} assistant={assistant} onClose={closeAssistant} />
+          <AssistantPanel map={map} topicId={selectedId ?? mainId} assistant={assistant} onClose={closeAssistant} />
         )}
 
         {panelOpen && !historyOpen && !aiOpen && !readOnly && !drawing && (

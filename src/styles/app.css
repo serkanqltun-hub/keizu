@@ -638,3 +638,10 @@ button.tag-chip { cursor: pointer; }
 .ai-dot.warn { background: #e8a33d; }
 .ai-dot.bad { background: #c92a2a; }
 .ai-cmd { flex: 1; min-width: 0; padding: 8px 10px; border-radius: 8px; background: var(--soft); font-family: 'JetBrains Mono', monospace; font-size: 12px; overflow-x: auto; white-space: nowrap; }
+.ai-next { width: 100%; }
+.ai-chat { display: flex; flex-direction: column; gap: 10px; max-height: 320px; overflow-y: auto; }
+.ai-turn { display: flex; flex-direction: column; gap: 4px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.ai-q { margin: 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.ai-tag { margin-left: 6px; padding: 0 6px; border-radius: 6px; background: var(--surface); border: 1px solid var(--line); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.ai-ask .row { justify-content: flex-end; }
+.ai-panel > * { flex-shrink: 0; }
